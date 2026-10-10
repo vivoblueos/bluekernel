@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod address_space;
+
 mod mem_attribute;
 pub use mem_attribute::{CachePolicy, MemAttribute, MemFlags, MemType};
 
+pub mod memory_bank;
 #[cfg(paging)]
 pub mod paging;
-pub mod memory_bank;
 
 #[repr(transparent)]
 pub struct PhysicalAddress(usize);
