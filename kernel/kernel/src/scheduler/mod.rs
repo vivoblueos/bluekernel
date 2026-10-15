@@ -239,6 +239,9 @@ fn switch_current_thread(next: ThreadNode, old_sp: usize) -> usize {
         GlobalQueueVisitor::remove(&mut old);
         if let Some(process) = old.process() {
             process.remove_thread(&mut old);
+            if process.has_no_threads() {
+                crate::process::ProcessManager::get().destroy_process(process.pid());
+            }
         }
         if ThreadNode::strong_count(&old) != 1 {
             // TODO: Add warning log that there are still references to the old thread.
