@@ -198,6 +198,42 @@ impl Semaphore {
         scheduler::yield_me_now_or_later();
     }
 
+    pub fn fixed_release(&self) {
+        let mut w = self.pending.irqsave_lock();
+        let old = self.counter.get();
+        #[cfg(debugging_scheduler)]
+        {
+            use crate::arch;
+            crate::trace!(
+                "[TH:0x{:x}] reads counter to release: {}",
+                scheduler::current_thread_id(),
+                old,
+            );
+        }
+        self.counter.set(old + 1);
+        if w.is_empty() {
+            return;
+        }
+        for next in w.iter() {
+            let t = next.thread.clone();
+            if scheduler::queue_ready_thread(thread::SUSPENDED, t).is_ok() {
+                break;
+            }
+            #[cfg(debugging_scheduler)]
+            {
+                use crate::arch;
+                crate::trace!(
+                    "[TH:0x{:x}] Failed to enqueue 0x{:x}, state: {}",
+                    scheduler::current_thread_id(),
+                    Thread::id(&next.thread),
+                    next.thread.state()
+                );
+            }
+        }
+        drop(w);
+        scheduler::yield_me_now_or_later();
+    }
+
     pub fn reset(&self) -> usize {
         let mut w = self.pending.irqsave_lock();
         self.counter.set(0);
@@ -212,8 +248,15 @@ unsafe impl Sync for Semaphore {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler::{InsertByPrio, InsertMode, InsertToEnd};
+    use crate::{
+        scheduler::{InsertByPrio, InsertMode, InsertToEnd},
+        sync::{wait_until, wake},
+        types::Arc,
+    };
     use blueos_test_macro::test;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    static LOST_WAKEUP_SEMAPHORE: Semaphore = Semaphore::new();
 
     #[test]
     fn test_semaphore_init() {
@@ -452,5 +495,51 @@ mod tests {
         // Thread 3: should be able to acquire now
         assert!(semaphore.try_acquire::<InsertToEnd>());
         assert_eq!(semaphore.counter.get(), 0);
+    }
+
+    #[test]
+    fn test_semaphore_consecutive_releases() {
+        assert!(LOST_WAKEUP_SEMAPHORE.init(0));
+
+        let acquired = Arc::new(AtomicUsize::new(0));
+        let completed = Arc::new(AtomicUsize::new(0));
+
+        for _ in 0..2 {
+            let acquired = acquired.clone();
+            let completed = completed.clone();
+            crate::thread::spawn(move || {
+                if LOST_WAKEUP_SEMAPHORE.acquire_timeout::<InsertToEnd>(Tick(100)) {
+                    acquired.fetch_add(1, Ordering::Release);
+                }
+                completed.fetch_add(1, Ordering::Release);
+                wake(&completed);
+            })
+            .expect("failed to spawn semaphore waiter");
+        }
+
+        // Make sure both threads are suspended in the semaphore wait queue
+        // before releasing any permits.
+        while LOST_WAKEUP_SEMAPHORE
+            .pending
+            .irqsave_lock()
+            .iter()
+            .count()
+            != 2
+        {
+            scheduler::yield_me();
+        }
+
+        // Keep the first woken waiter from consuming its permit before the
+        // second release. This deterministically creates the sequence:
+        // counter 0 -> 1 (wake A) -> 2 (must wake B).
+        let preempt_guard = Thread::try_preempt_me();
+        assert!(preempt_guard.preemptable());
+        LOST_WAKEUP_SEMAPHORE.release();
+        LOST_WAKEUP_SEMAPHORE.release();
+        drop(preempt_guard);
+
+        wait_until(2, &completed);
+        assert_eq!(acquired.load(Ordering::Acquire), 2);
+        assert_eq!(LOST_WAKEUP_SEMAPHORE.count(), 0);
     }
 }
