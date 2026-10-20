@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-//! Configures gnrt behavior. Types match `gnrt_config.toml` fields. Currently
-//! only used for std bindings.
+//! Configures GN declaration collection and legacy commands.
 
 use crate::crates::Epoch;
 use crate::group::Group;
@@ -39,6 +38,9 @@ pub fn parse_crate_key(key: &str) -> Result<(&str, Option<Epoch>)> {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BuildConfig {
+    /// Settings for collecting declarations from GN.
+    pub collect: CollectConfig,
+
     pub resolve: ResolveConfig,
     #[serde(rename = "gn")]
     pub gn_config: GnConfig,
@@ -66,8 +68,9 @@ impl BuildConfig {
         T::Target: Hash + Eq + PartialEq,
     {
         let all_crates_vec: &Vec<T> = entry_getter(&self.all_config);
-        let maybe_per_crate_vec: Option<&Vec<T>> =
-            self.get_crate_config(package_name, version).map(&entry_getter);
+        let maybe_per_crate_vec: Option<&Vec<T>> = self
+            .get_crate_config(package_name, version)
+            .map(&entry_getter);
         let combined_vecs = std::iter::once(all_crates_vec).chain(maybe_per_crate_vec);
         combined_vecs.flatten().map(Deref::deref).collect()
     }
@@ -82,7 +85,11 @@ impl BuildConfig {
     ) -> HashMap<String, V> {
         let mut result = entry_getter(&self.all_config).clone();
         if let Some(crate_config) = self.get_crate_config(package_name, version) {
-            result.extend(entry_getter(crate_config).iter().map(|(k, v)| (k.clone(), v.clone())));
+            result.extend(
+                entry_getter(crate_config)
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
         }
         result
     }
@@ -90,7 +97,9 @@ impl BuildConfig {
     pub fn get_crate_config(&self, package_name: &str, version: &Version) -> Option<&CrateConfig> {
         let epoch = Epoch::from_version(version);
         let epoch_key = make_epoch_key(package_name, epoch);
-        self.per_crate_config.get(&epoch_key).or_else(|| self.per_crate_config.get(package_name))
+        self.per_crate_config
+            .get(&epoch_key)
+            .or_else(|| self.per_crate_config.get(package_name))
     }
 
     pub fn from_path(path: &Path) -> Result<Self> {
@@ -139,6 +148,14 @@ impl BuildConfig {
     }
 }
 
+/// Configures the declaration collection phase.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CollectConfig {
+    /// Project-root-relative BUILD.gn files containing Cargo declarations.
+    pub declaration_files: Vec<std::path::PathBuf>,
+}
+
 /// Configures GN output for this session.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -178,6 +195,9 @@ pub struct VetConfig {
 pub struct ResolveConfig {
     /// The Cargo package to use as the root of the dependency graph.
     pub root: String,
+    /// Project-root-relative BUILD.gn exporting Rust toolchain metadata.
+    #[serde(default)]
+    pub toolchain_file: std::path::PathBuf,
     /// Remove crates from the set of resolved dependencies. Should be used
     /// sparingly; it does not affect Cargo's dependency resolution, so the
     /// output can easily be incorrect. This is primarily intended to work
@@ -258,14 +278,58 @@ mod test {
     use super::*;
 
     #[test]
+    fn resolve_toolchain_file_is_optional() {
+        let config: BuildConfig = toml::from_str("").unwrap();
+        assert!(config.resolve.toolchain_file.as_os_str().is_empty());
+        let config: BuildConfig =
+            toml::from_str("[resolve]\nroot = \"crates_io\"\nremove_crates = []\ntoolchain_file = \"build/toolchain/BUILD.gn\"")
+                .unwrap();
+        assert_eq!(
+            config.resolve.toolchain_file,
+            Path::new("build/toolchain/BUILD.gn")
+        );
+        assert!(
+            toml::from_str::<BuildConfig>("[[collect.entries]]\ntarget = \"//:default\"").is_err()
+        );
+    }
+
+    #[test]
+    fn collect_declaration_files_defaults() {
+        let config: BuildConfig = toml::from_str("").unwrap();
+        assert!(config.collect.declaration_files.is_empty());
+    }
+
+    #[test]
+    fn collect_declaration_files_override() {
+        let config: BuildConfig = toml::from_str(
+            r#"[collect]
+                declaration_files = ["external/rust/BUILD.gn", "external/rust/esp/BUILD.gn"]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.collect.declaration_files,
+            vec![
+                std::path::PathBuf::from("external/rust/BUILD.gn"),
+                std::path::PathBuf::from("external/rust/esp/BUILD.gn")
+            ]
+        );
+    }
+
+    #[test]
     fn test_get_combined_set_with_global_and_per_crate_entry() {
-        let all_config =
-            CrateConfig { bin_targets: vec!["foo".to_string()], ..CrateConfig::default() };
-        let crate_config =
-            CrateConfig { bin_targets: vec!["bar".to_string()], ..CrateConfig::default() };
+        let all_config = CrateConfig {
+            bin_targets: vec!["foo".to_string()],
+            ..CrateConfig::default()
+        };
+        let crate_config = CrateConfig {
+            bin_targets: vec!["bar".to_string()],
+            ..CrateConfig::default()
+        };
         let build_config = BuildConfig {
             all_config,
-            per_crate_config: [("some_crate".to_string(), crate_config)].into_iter().collect(),
+            per_crate_config: [("some_crate".to_string(), crate_config)]
+                .into_iter()
+                .collect(),
             ..BuildConfig::default()
         };
         let version = Version::new(1, 0, 0);
@@ -288,7 +352,9 @@ mod test {
         };
         let build_config = BuildConfig {
             all_config,
-            per_crate_config: [("some_crate".to_string(), crate_config)].into_iter().collect(),
+            per_crate_config: [("some_crate".to_string(), crate_config)]
+                .into_iter()
+                .collect(),
             ..BuildConfig::default()
         };
         let version = Version::new(1, 0, 0);
@@ -301,9 +367,14 @@ mod test {
 
     #[test]
     fn test_get_combined_set_with_only_global_entry() {
-        let all_config =
-            CrateConfig { bin_targets: vec!["foo".to_string()], ..CrateConfig::default() };
-        let build_config = BuildConfig { all_config, ..BuildConfig::default() };
+        let all_config = CrateConfig {
+            bin_targets: vec!["foo".to_string()],
+            ..CrateConfig::default()
+        };
+        let build_config = BuildConfig {
+            all_config,
+            ..BuildConfig::default()
+        };
         let version = Version::new(1, 0, 0);
         let combined_set =
             build_config.get_combined_set("some_crate", &version, |cfg| &cfg.bin_targets);
@@ -316,21 +387,33 @@ mod test {
         let mut build_config = BuildConfig::default();
         build_config.insert_crate_config_for_testing(
             "foo@v1",
-            CrateConfig { bin_targets: vec!["v1_target".to_string()], ..CrateConfig::default() },
+            CrateConfig {
+                bin_targets: vec!["v1_target".to_string()],
+                ..CrateConfig::default()
+            },
         );
         build_config.insert_crate_config_for_testing(
             "foo@v2",
-            CrateConfig { bin_targets: vec!["v2_target".to_string()], ..CrateConfig::default() },
+            CrateConfig {
+                bin_targets: vec!["v2_target".to_string()],
+                ..CrateConfig::default()
+            },
         );
 
         let v1 = Version::new(1, 5, 0);
         let v2 = Version::new(2, 0, 0);
         assert_eq!(
-            build_config.get_crate_config("foo", &v1).unwrap().bin_targets,
+            build_config
+                .get_crate_config("foo", &v1)
+                .unwrap()
+                .bin_targets,
             vec!["v1_target"]
         );
         assert_eq!(
-            build_config.get_crate_config("foo", &v2).unwrap().bin_targets,
+            build_config
+                .get_crate_config("foo", &v2)
+                .unwrap()
+                .bin_targets,
             vec!["v2_target"]
         );
     }
@@ -340,18 +423,27 @@ mod test {
         let mut build_config = BuildConfig::default();
         build_config.insert_crate_config_for_testing(
             "foo",
-            CrateConfig { bin_targets: vec!["unversioned".to_string()], ..CrateConfig::default() },
+            CrateConfig {
+                bin_targets: vec!["unversioned".to_string()],
+                ..CrateConfig::default()
+            },
         );
 
         // All versions fall back to unversioned config.
         let v1 = Version::new(1, 0, 0);
         let v2 = Version::new(2, 0, 0);
         assert_eq!(
-            build_config.get_crate_config("foo", &v1).unwrap().bin_targets,
+            build_config
+                .get_crate_config("foo", &v1)
+                .unwrap()
+                .bin_targets,
             vec!["unversioned"]
         );
         assert_eq!(
-            build_config.get_crate_config("foo", &v2).unwrap().bin_targets,
+            build_config
+                .get_crate_config("foo", &v2)
+                .unwrap()
+                .bin_targets,
             vec!["unversioned"]
         );
     }
@@ -359,8 +451,12 @@ mod test {
     #[test]
     fn test_validation_rejects_mixed_versioned_and_unversioned() {
         let mut build_config = BuildConfig::default();
-        build_config.per_crate_config.insert("foo".to_string(), CrateConfig::default());
-        build_config.per_crate_config.insert("foo@v1".to_string(), CrateConfig::default());
+        build_config
+            .per_crate_config
+            .insert("foo".to_string(), CrateConfig::default());
+        build_config
+            .per_crate_config
+            .insert("foo@v1".to_string(), CrateConfig::default());
 
         let result = build_config.validate();
         assert!(result.is_err());

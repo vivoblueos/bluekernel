@@ -38,6 +38,11 @@ pub trait GnrtPaths {
         ))
     }
 
+    /// Returns the metadata directory for a GN build output directory.
+    fn gnrt_out_dir(&self, build_out_dir: &Path) -> PathBuf {
+        build_out_dir.join("gnrt")
+    }
+
     /// Returns the name of a directory where we want to vendor a third-party
     /// crate with the given `name` and `version`.
     fn get_vendor_dir_for_package(&self, name: &str, version: &semver::Version) -> PathBuf;
