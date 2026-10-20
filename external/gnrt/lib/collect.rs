@@ -324,6 +324,7 @@ pub fn collect(
         catalog,
         collect_inputs,
         scopes,
+        crates: Default::default(),
     })
 }
 

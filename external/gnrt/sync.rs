@@ -12,22 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Collects registered GN dependency declarations for a BlueKernel build.
+//! Collects GN declarations and resolves host and target crate features.
 //!
 //! The current working directory is the project root and must contain `.gn`.
 
 use crate::collect;
 use crate::config::BuildConfig;
 use crate::paths;
+use crate::resolve;
 use crate::SyncCommandArgs;
 use anyhow::{bail, Context, Result};
 
-/// Collects registered declarations and writes their JSON representation.
+/// Collects declarations and resolves their Cargo dependency features.
 ///
 /// # Errors
 ///
 /// Returns an error if the project root has no `.gn` file, configuration cannot
-/// be loaded, or declaration collection fails.
+/// be loaded, or collection or dependency resolution fails.
 pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
     if !paths.root().join(".gn").is_file() {
         bail!(
@@ -37,7 +38,7 @@ pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
     }
     let build_out_dir = paths.root().join(&args.out);
 
-    println!("Collecting GN dependency declarations ...");
+    println!("Collecting and resolving GN dependency declarations ...");
     println!("  GN root: {}", paths.root().display());
     println!("  build output: {}", build_out_dir.display());
 
@@ -45,7 +46,7 @@ pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
 
     let config = BuildConfig::from_path(paths.third_party_config_file())?;
     let collection_out_dir = gnrt_dir.join("collect");
-    collect::collect(
+    let mut context = collect::collect(
         &collection_out_dir,
         &gnrt_dir,
         args.target.as_deref(),
@@ -53,8 +54,9 @@ pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
         &config,
     )
     .context("GN declaration collection failed")?;
+    resolve::resolve(&mut context, paths, &gnrt_dir)?;
 
-    println!("declaration collection completed successfully.");
+    println!("dependency resolution completed successfully.");
 
     Ok(())
 }

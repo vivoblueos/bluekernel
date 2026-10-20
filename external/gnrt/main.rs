@@ -42,7 +42,7 @@ enum Command {
     #[command(about = "Download all third-party crate dependencies in //third_party/rust")]
     Vendor(VendorCommandArgs),
 
-    #[command(about = "Collect GN dependency declarations")]
+    #[command(about = "Collect declarations and resolve Cargo dependency features")]
     Sync(SyncCommandArgs),
 }
 
@@ -124,7 +124,7 @@ struct SyncCommandArgs {
         This is the directory passed to `gn gen`, e.g. `out/blueos_release`."
     )]
     out: PathBuf,
-    #[arg(long, help = "Collect all registered crate declarations.")]
+    #[arg(long, help = "Prepare all registered crate declarations.")]
     all: bool,
     // FIXME: Enable --target only when nested GN graphs can be collected completely.
     #[arg(skip)]

@@ -14,8 +14,10 @@ pub mod gn;
 pub mod group;
 pub mod inherit;
 pub mod manifest;
+pub mod package;
 pub mod paths;
 pub mod readme;
+pub mod resolve;
 pub mod sync_context;
 pub mod target_triple {
     include!(concat!(env!("OUT_DIR"), "/target_triple.rs"));

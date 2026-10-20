@@ -21,6 +21,7 @@ use guppy::{
 };
 use itertools::Itertools;
 pub use semver::Version;
+use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Display},
@@ -161,7 +162,7 @@ pub struct PerKindInfo {
 }
 
 /// Description of a package's lib target.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LibTarget {
     /// The absolute path of the lib target's `lib.rs`.
     pub root: PathBuf,
@@ -171,7 +172,7 @@ pub struct LibTarget {
 }
 
 /// A binary provided by a package.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct BinTarget {
     /// The absolute path of the binary's root source file (e.g. `main.rs`).
     pub root: PathBuf,
@@ -180,7 +181,8 @@ pub struct BinTarget {
 }
 
 /// The type of lib target. Only includes types supported by this tool.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LibType {
     /// A normal Rust rlib library.
     Rlib,
@@ -564,12 +566,19 @@ fn get_package_dependencies(
         .collect()
 }
 
-struct BuildTargets {
-    lib_target: Option<LibTarget>,
-    bin_targets: Vec<BinTarget>,
-    build_script: Option<PathBuf>,
+/// Compilation targets discovered for a Cargo package.
+pub(crate) struct BuildTargets {
+    pub(crate) lib_target: Option<LibTarget>,
+    pub(crate) bin_targets: Vec<BinTarget>,
+    pub(crate) build_script: Option<PathBuf>,
 }
-fn get_build_targets(
+
+/// Returns the library, selected binaries, and build script of a package.
+///
+/// # Errors
+///
+/// Returns an error if the library has an unsupported crate type.
+pub(crate) fn get_build_targets(
     package: &PackageMetadata,
     extra_config: &BuildConfig,
 ) -> Result<BuildTargets> {

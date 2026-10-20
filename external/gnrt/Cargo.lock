@@ -662,6 +662,8 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
+ "shlex",
  "spdx",
  "strum",
  "strum_macros",
@@ -1790,6 +1792,8 @@ checksum = "49424d0fdcba4406e46d1cea3014c4d1987263790b8e5d1be45c4509c9d52553"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
+ "serde",
+ "serde_json",
  "target-lexicon",
 ]
 

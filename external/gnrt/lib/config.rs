@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-//! Configures GN declaration collection and legacy commands.
+//! Configures GN declaration collection, Cargo resolution, and legacy commands.
 
 use crate::crates::Epoch;
 use crate::group::Group;
@@ -17,10 +17,16 @@ use std::{
     path::Path,
 };
 
+/// Combines a package name and epoch into a configuration key.
 pub fn make_epoch_key(package_name: &str, epoch: Epoch) -> String {
     format!("{package_name}@{epoch}")
 }
 
+/// Parses a crate configuration key into its name and optional epoch.
+///
+/// # Errors
+///
+/// Returns an error if the key contains an invalid epoch.
 pub fn parse_crate_key(key: &str) -> Result<(&str, Option<Epoch>)> {
     match key.find('@') {
         Some(pos) => {
@@ -35,12 +41,13 @@ pub fn parse_crate_key(key: &str) -> Result<(&str, Option<Epoch>)> {
     }
 }
 
+/// The complete gnrt configuration loaded from `gnrt_config.toml`.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BuildConfig {
     /// Settings for collecting declarations from GN.
     pub collect: CollectConfig,
-
+    /// Settings that affect Cargo dependency resolution.
     pub resolve: ResolveConfig,
     #[serde(rename = "gn")]
     pub gn_config: GnConfig,
@@ -94,6 +101,12 @@ impl BuildConfig {
         result
     }
 
+    /// Iterates all per-crate configs by their key (`name` or `name@vEpoch`).
+    pub fn iter_per_crate(&self) -> impl Iterator<Item = (&String, &CrateConfig)> {
+        self.per_crate_config.iter()
+    }
+
+    /// Looks up configuration for a package, preferring its exact epoch key.
     pub fn get_crate_config(&self, package_name: &str, version: &Version) -> Option<&CrateConfig> {
         let epoch = Epoch::from_version(version);
         let epoch_key = make_epoch_key(package_name, epoch);
@@ -102,6 +115,24 @@ impl BuildConfig {
             .or_else(|| self.per_crate_config.get(package_name))
     }
 
+    /// Combines global and crate-specific conditional dependency removals.
+    pub fn get_combined_conditional_removals(
+        &self,
+        package_name: &str,
+        version: &Version,
+    ) -> Vec<&ConditionalRemoval> {
+        let mut removals = self.all_config.remove_deps_when.iter().collect::<Vec<_>>();
+        if let Some(config) = self.get_crate_config(package_name, version) {
+            removals.extend(&config.remove_deps_when);
+        }
+        removals
+    }
+
+    /// Reads and validates gnrt configuration from a TOML file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed, or validated.
     pub fn from_path(path: &Path) -> Result<Self> {
         let context = || format!("Error reading `gnrt_config.toml` from `{}`", path.display());
         let file_content = std::fs::read_to_string(path).with_context(context)?;
@@ -139,6 +170,21 @@ impl BuildConfig {
             }
         }
 
+        validate_conditional_removals(
+            "resolve.remove_crates_when",
+            &self.resolve.remove_crates_when,
+        )?;
+        validate_conditional_removals(
+            "all-crates.remove_deps_when",
+            &self.all_config.remove_deps_when,
+        )?;
+        for (crate_name, crate_config) in &self.per_crate_config {
+            validate_conditional_removals(
+                &format!("crate.{crate_name}.remove_deps_when"),
+                &crate_config.remove_deps_when,
+            )?;
+        }
+
         Ok(())
     }
 
@@ -146,6 +192,21 @@ impl BuildConfig {
     pub fn insert_crate_config_for_testing(&mut self, key: &str, config: CrateConfig) {
         self.per_crate_config.insert(key.to_string(), config);
     }
+}
+
+fn validate_conditional_removals(path: &str, removals: &[ConditionalRemoval]) -> Result<()> {
+    for removal in removals {
+        if removal.package.is_empty() {
+            bail!("{path} contains a removal with an empty package name");
+        }
+        target_spec::TargetSpec::new(removal.when.clone()).with_context(|| {
+            format!(
+                "{path} has an invalid Cargo target selector for package {}: {}",
+                removal.package, removal.when
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// Configures the declaration collection phase.
@@ -195,6 +256,9 @@ pub struct VetConfig {
 pub struct ResolveConfig {
     /// The Cargo package to use as the root of the dependency graph.
     pub root: String,
+    /// Project-root-relative path to the canonical Cargo lockfile.
+    #[serde(default)]
+    pub cargo_lockfile: std::path::PathBuf,
     /// Project-root-relative BUILD.gn exporting Rust toolchain metadata.
     #[serde(default)]
     pub toolchain_file: std::path::PathBuf,
@@ -203,6 +267,37 @@ pub struct ResolveConfig {
     /// output can easily be incorrect. This is primarily intended to work
     /// around bugs in `cargo metadata` output.
     pub remove_crates: HashSet<String>,
+    /// Remove a crate only when the Cargo target selector matches.
+    #[serde(default)]
+    pub remove_crates_when: Vec<ConditionalRemoval>,
+}
+
+impl ResolveConfig {
+    /// Resolves the canonical lockfile path against the project root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lockfile path is missing or absolute.
+    pub fn cargo_lockfile_path(&self, root: &Path) -> Result<std::path::PathBuf> {
+        if self.cargo_lockfile.as_os_str().is_empty() {
+            bail!("resolve.cargo_lockfile must be configured in gnrt_config.toml");
+        }
+        if self.cargo_lockfile.is_absolute() {
+            bail!("resolve.cargo_lockfile must be relative to the project root");
+        }
+        Ok(root.join(&self.cargo_lockfile))
+    }
+}
+
+/// A package removal constrained by a Cargo target selector.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConditionalRemoval {
+    /// The Cargo package name to remove.
+    pub package: String,
+
+    /// The Cargo target selector under which the package is removed.
+    pub when: String,
 }
 
 /// Customizes GN output for a crate.
@@ -214,6 +309,8 @@ pub struct CrateConfig {
     /// enabled but the dep is removed, the crate will still attempt to
     /// reference that dependency.
     pub remove_deps: Vec<String>,
+    /// Dependencies to remove only when the Cargo target selector matches.
+    pub remove_deps_when: Vec<ConditionalRemoval>,
     /// Deps on generated targets to exclude from this target's `deps` list.
     /// These do not affect dependency resolution, so it will not change any
     /// other generated targets.
@@ -247,20 +344,31 @@ pub struct CrateConfig {
     // Third-party crate settings.
     #[serde(default)]
     pub allow_first_party_usage: bool,
+
     #[serde(default)]
     pub build_script_outputs: Vec<std::path::PathBuf>,
+
     #[serde(default)]
     pub group: Option<Group>,
+    /// Patch files to apply to the vendored crate after `cargo vendor`,
+    /// regardless of how the crate was declared. Paths are GN-root-relative,
+    /// matching `patches` on a `cargo_spec` declaration. Use this for crates
+    /// that are only transitive dependencies or have several declarations.
+    #[serde(default)]
+    pub patches: Vec<String>,
     #[serde(default)]
     pub security_critical: Option<bool>,
+
     #[serde(default)]
     pub shipped: Option<bool>,
+
     #[serde(default)]
     pub license: Option<String>,
+
     #[serde(default)]
     pub license_files: Vec<String>,
     /// Include `.lib` files under these paths relative to the crate's root
-    /// source file as part of the crate. They will be available for #[link]
+    /// source file as part of the crate. They will be available for `#[link]`
     /// directives in the crate. The roots may each be a single file or a
     /// directory.
     ///
@@ -278,9 +386,49 @@ mod test {
     use super::*;
 
     #[test]
+    fn resolve_cargo_lockfile_is_project_root_relative() {
+        let config: BuildConfig = toml::from_str(
+            r#"[resolve]
+                root = "crates_io"
+                cargo_lockfile = "external/rust/Cargo.lock"
+                remove_crates = []
+                remove_crates_when = []"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config
+                .resolve
+                .cargo_lockfile_path(Path::new("/checkout"))
+                .unwrap(),
+            Path::new("/checkout/external/rust/Cargo.lock")
+        );
+    }
+
+    #[test]
+    fn resolve_cargo_lockfile_must_be_configured_and_relative() {
+        let config = ResolveConfig::default();
+        assert!(config
+            .cargo_lockfile_path(Path::new("/checkout"))
+            .unwrap_err()
+            .to_string()
+            .contains("must be configured"));
+
+        let config = ResolveConfig {
+            cargo_lockfile: Path::new("/tmp/Cargo.lock").to_path_buf(),
+            ..ResolveConfig::default()
+        };
+        assert!(config
+            .cargo_lockfile_path(Path::new("/checkout"))
+            .unwrap_err()
+            .to_string()
+            .contains("must be relative"));
+    }
+
+    #[test]
     fn resolve_toolchain_file_is_optional() {
         let config: BuildConfig = toml::from_str("").unwrap();
         assert!(config.resolve.toolchain_file.as_os_str().is_empty());
+        assert!(config.resolve.remove_crates_when.is_empty());
         let config: BuildConfig =
             toml::from_str("[resolve]\nroot = \"crates_io\"\nremove_crates = []\ntoolchain_file = \"build/toolchain/BUILD.gn\"")
                 .unwrap();
@@ -445,6 +593,35 @@ mod test {
                 .unwrap()
                 .bin_targets,
             vec!["unversioned"]
+        );
+    }
+
+    #[test]
+    fn conditional_removals_accept_cargo_target_selectors() {
+        let config: BuildConfig = toml::from_str(
+            r#"
+                [resolve]
+                root = "root"
+                remove_crates = []
+
+                [[resolve.remove_crates_when]]
+                package = "windows-sys"
+                when = 'cfg(target_os = "windows")'
+
+                [crate.root]
+                [[crate.root.remove_deps_when]]
+                package = "cc"
+                when = 'x86_64-pc-windows-msvc'
+            "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.resolve.remove_crates_when.len(), 1);
+        assert_eq!(
+            config
+                .get_combined_conditional_removals("root", &Version::new(1, 0, 0))
+                .len(),
+            1
         );
     }
 
