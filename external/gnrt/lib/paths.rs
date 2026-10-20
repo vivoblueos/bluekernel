@@ -4,6 +4,7 @@
 
 //! Paths and helpers for running within a Chromium checkout.
 
+use crate::crates::{Epoch, NormalizedName};
 use itertools::Itertools;
 use std::env;
 use std::io;
@@ -11,60 +12,6 @@ use std::path::{Path, PathBuf};
 
 /// Chromium source tree paths. All members other than `root` are relative to
 /// `root`.
-#[cfg(feature = "blueos")]
-pub struct BluePaths {
-    /// The blueos checkout root, as an absolute path.
-    pub root: PathBuf,
-    /// The third_party directory.
-    pub third_party: &'static Path,
-    pub third_party_cargo_root: &'static Path,
-    pub third_party_config_file: &'static Path,
-    pub vet_config_file: &'static Path,
-}
-#[cfg(feature = "blueos")]
-pub type ChromiumPaths = BluePaths;
-
-#[cfg(feature = "blueos")]
-impl BluePaths {
-    pub fn new() -> io::Result<BluePaths> {
-        let cur_dir = env::current_dir()?;
-
-        Ok(BluePaths {
-            root: cur_dir.clone(),
-            third_party: check_path(&cur_dir, THIRD_PARTY_DIR)?,
-            third_party_cargo_root: check_path(&cur_dir, THIRD_PARTY_CARGO_ROOT)?,
-            third_party_config_file: check_path(&cur_dir, THIRD_PARTY_CONFIG_FILE)?,
-            vet_config_file: Path::new(VET_CONFIG_FILE),
-        })
-    }
-
-    /// Given an absolute path to a file in the checkout, get an absolute GN
-    /// path suitable for use in GN rules.
-    pub fn to_gn_abs_path(&self, path: &Path) -> Result<String, std::path::StripPrefixError> {
-        Ok(normalize_unix_path_separator(
-            if let Ok(result) = path.strip_prefix(&self.root) {
-                result
-            } else {
-                path
-            }, // path.strip_prefix(&self.root)?,
-        ))
-    }
-
-    /// Modifies the file name in a path from `foo.bar.template` to `foo.bar`.
-    pub fn strip_template(&self, path: &Path) -> Option<std::path::PathBuf> {
-        if path.extension()? != "template" {
-            None
-        } else {
-            let mut buf = path.to_owned();
-            buf.set_file_name(path.file_stem()?);
-            Some(buf)
-        }
-    }
-}
-
-/// Chromium source tree paths. All members other than `root` are relative to
-/// `root`.
-#[cfg(not(feature = "blueos"))]
 pub struct ChromiumPaths {
     /// The chromium/src checkout root, as an absolute path.
     pub root: PathBuf,
@@ -86,11 +33,8 @@ pub struct ChromiumPaths {
 
     pub third_party_cargo_root: &'static Path,
     pub third_party_config_file: &'static Path,
-
-    pub vet_config_file: &'static Path,
 }
 
-#[cfg(not(feature = "blueos"))]
 impl ChromiumPaths {
     /// Create the `ChromiumPaths` resolver. Accesses the filesystem to get the
     /// checkout root.
@@ -120,18 +64,13 @@ impl ChromiumPaths {
 
             third_party_cargo_root: check_path(&cur_dir, THIRD_PARTY_CARGO_ROOT)?,
             third_party_config_file: check_path(&cur_dir, THIRD_PARTY_CONFIG_FILE)?,
-
-            // The vet config file does not exist, since gnrt writes it.
-            vet_config_file: Path::new(VET_CONFIG_FILE),
         })
     }
 
     /// Given an absolute path to a file in the checkout, get an absolute GN
     /// path suitable for use in GN rules.
     pub fn to_gn_abs_path(&self, path: &Path) -> Result<String, std::path::StripPrefixError> {
-        Ok(normalize_unix_path_separator(
-            path.strip_prefix(&self.root)?,
-        ))
+        Ok(normalize_unix_path_separator(path.strip_prefix(&self.root)?))
     }
 
     /// Modifies the file name in a path from `foo.bar.template` to `foo.bar`.
@@ -149,13 +88,10 @@ impl ChromiumPaths {
 fn check_path<'a>(root: &Path, p_str: &'a str) -> io::Result<&'a Path> {
     let p = Path::new(p_str);
     if !root.join(p).exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "could not find {} (invoked from Chromium checkout root?)",
-                p.display()
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "could not find {} (invoked from Chromium checkout root?)",
+            p.display()
+        )));
     }
 
     Ok(p)
@@ -163,50 +99,56 @@ fn check_path<'a>(root: &Path, p_str: &'a str) -> io::Result<&'a Path> {
 
 /// Replace all path separators with `/` and return it as a String. The
 /// resulting path is suitable for use in GN files.
-pub fn normalize_unix_path_separator(path: &Path) -> String {
+pub fn normalize_unix_path_separator(path: impl AsRef<Path>) -> String {
     // `Path`s on windows use `\` separators and we need to use `/` in GN strings.
+    let path = path.as_ref();
     path.iter()
-        .map(|comp| {
-            comp.to_str()
-                .unwrap_or_else(|| panic!("non-UTF-8 in path {:?}", path))
-        })
+        .map(|comp| comp.to_str().unwrap_or_else(|| panic!("non-UTF-8 in path {path:?}")))
         .join("/")
 }
-#[cfg(not(feature = "blueos"))]
+
+/// Returns the name of a directory where we want to vendor a third-party crate
+/// with the given `name` and `version`.
+///
+/// Note that this can be quite an arbitrary name, because `cargo` will
+/// discover available crates by reading all the nested `Cargo.toml`
+/// files (rather than based on directory names).  See also
+/// https://crbug.com/396397336#comment7 and adjacent comments.
+pub fn get_vendor_dir_for_package(
+    paths: &ChromiumPaths,
+    name: &str,
+    version: &semver::Version,
+) -> PathBuf {
+    let epoch = Epoch::from_version(version);
+    paths.third_party_cargo_root.join("vendor").join(Path::new(&format!("{name}-{epoch}")))
+}
+
+/// Returns the name of a directory where we generate `BUILD.gn` (and also
+/// `README.chromium`).
+pub fn get_build_dir_for_package(
+    paths: &ChromiumPaths,
+    name: &str,
+    version: &semver::Version,
+) -> PathBuf {
+    paths
+        .third_party
+        .join(NormalizedName::from_crate_name(name).to_string())
+        .join(Epoch::from_version(version).to_string())
+}
+
 static RUST_THIRD_PARTY_DIR: &str = "third_party/rust";
-#[cfg(not(feature = "blueos"))]
 static RUST_SRC_LIBRARY_SUBDIR: &str = "library";
-#[cfg(not(feature = "blueos"))]
 static RUST_SRC_VENDOR_SUBDIR: &str = "library/vendor";
-#[cfg(not(feature = "blueos"))]
 static RUST_SRC_INSTALLED_DIR: &str = "third_party/rust-toolchain/lib/rustlib/src/rust";
 
-#[cfg(not(feature = "blueos"))]
 static STD_CONFIG_FILE: &str = "build/rust/std/gnrt_config.toml";
-#[cfg(not(feature = "blueos"))]
 static STD_BUILD_DIR: &str = "build/rust/std/rules";
-#[cfg(not(feature = "blueos"))]
 static STD_FAKE_ROOT: &str = "build/rust/std/fake_root";
-#[cfg(not(feature = "blueos"))]
 static STD_FAKE_ROOT_CONFIG_TEMPLATE: &str = "build/rust/std/fake_root/.cargo/config.toml.template";
-#[cfg(not(feature = "blueos"))]
 static STD_FAKE_ROOT_CARGO_TEMPLATE: &str = "build/rust/std/fake_root/Cargo.toml.template";
-#[cfg(not(feature = "blueos"))]
+
 static THIRD_PARTY_CARGO_ROOT: &str = "third_party/rust/chromium_crates_io";
-#[cfg(not(feature = "blueos"))]
 static THIRD_PARTY_CONFIG_FILE: &str = "third_party/rust/chromium_crates_io/gnrt_config.toml";
-
-#[cfg(not(feature = "blueos"))]
-static VET_CONFIG_FILE: &str = "third_party/rust/chromium_crates_io/supply-chain/config.toml";
-
-#[cfg(feature = "blueos")]
-static THIRD_PARTY_DIR: &str = "external";
-#[cfg(feature = "blueos")]
-static THIRD_PARTY_CARGO_ROOT: &str = "external/";
-#[cfg(feature = "blueos")]
-static THIRD_PARTY_CONFIG_FILE: &str = "external/gnrt_config.toml";
-#[cfg(feature = "blueos")]
-static VET_CONFIG_FILE: &str = "external/supply-chain/config.toml";
 
 #[cfg(test)]
 mod tests {
@@ -215,9 +157,6 @@ mod tests {
     #[test]
     fn test_normalize() {
         assert_eq!(normalize_unix_path_separator(Path::new("rel")), "rel");
-        assert_eq!(
-            normalize_unix_path_separator(&Path::new("a").join("b")),
-            "a/b"
-        );
+        assert_eq!(normalize_unix_path_separator(&Path::new("a").join("b")), "a/b");
     }
 }

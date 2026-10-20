@@ -17,10 +17,7 @@ pub fn update(args: UpdateCommandArgs, paths: &paths::ChromiumPaths) -> Result<(
 }
 
 fn update_impl(args: UpdateCommandArgs, paths: &paths::ChromiumPaths) -> Result<()> {
-    println!(
-        "Updating crates from {}",
-        paths.third_party_cargo_root.display()
-    );
+    println!("Updating crates from {}", paths.third_party_cargo_root.display());
 
     run_cargo_command(
         paths.third_party_cargo_root.into(),
