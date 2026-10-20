@@ -12,7 +12,8 @@ mod update;
 mod util;
 mod vendor;
 
-use anyhow::{Context, Result};
+use crate::paths;
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gnrt_lib::*;
 
@@ -116,14 +117,26 @@ fn main() -> Result<()> {
 
     let args = GnrtArgs::parse();
 
-    let paths = paths::ChromiumPaths::new().context("Could not find chromium checkout paths")?;
+    let root_paths = paths::BlueOsPaths::new()?;
+    let paths: &dyn paths::GnrtPaths = &root_paths;
 
     match args.command {
-        Command::Add(args) => add::add(args, &paths),
-        Command::Fmt => fmt::format(&paths),
-        Command::Gen(args) => r#gen::generate(args, &paths),
-        Command::Update(args) => update::update(args, &paths),
-        Command::Vendor(args) => vendor::vendor(args, &paths),
+        Command::Add(args) => add::add(args, paths),
+        Command::Fmt => fmt::format(paths),
+        Command::Gen(args) => {
+            if args.for_std.is_some() {
+                #[cfg(feature = "chromium")]
+                {
+                    let chromium_paths = paths::ChromiumPaths::new()?;
+                    return r#gen::generate_for_std(args, &chromium_paths);
+                }
+                #[cfg(not(feature = "chromium"))]
+                anyhow::bail!("`--for-std` is only supported with the chromium feature enabled");
+            }
+            r#gen::generate(args, paths)
+        }
+        Command::Update(args) => update::update(args, paths),
+        Command::Vendor(args) => vendor::vendor(args, paths),
     }
 }
 

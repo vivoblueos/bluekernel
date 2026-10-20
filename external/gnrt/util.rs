@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use crate::paths::ChromiumPaths;
+use crate::paths::GnrtPaths;
 
 use anyhow::{ensure, format_err, Context, Result};
 use handlebars::{handlebars_helper, Renderable};
@@ -17,11 +17,14 @@ use std::{
 };
 
 pub fn check_spawn(cmd: &mut process::Command, cmd_msg: &str) -> Result<process::Child> {
-    cmd.spawn().with_context(|| format!("failed to start {cmd_msg}"))
+    cmd.spawn()
+        .with_context(|| format!("failed to start {cmd_msg}"))
 }
 
 pub fn check_wait_with_output(child: process::Child, cmd_msg: &str) -> Result<process::Output> {
-    child.wait_with_output().with_context(|| format!("unexpected error while running {cmd_msg}"))
+    child
+        .wait_with_output()
+        .with_context(|| format!("unexpected error while running {cmd_msg}"))
 }
 
 pub fn run_command(mut cmd: process::Command, cmd_msg: &str, stdin: Option<&[u8]>) -> Result<()> {
@@ -50,8 +53,18 @@ pub fn check_exit_ok(output: &process::Output, cmd_msg: &str) -> Result<()> {
             Some(code) => write!(msg, "{code}.").unwrap(),
             None => write!(msg, "no code.").unwrap(),
         };
-        write!(msg, " stdout:\n\n{}", String::from_utf8_lossy(&output.stdout)).unwrap();
-        write!(msg, " stderr:\n\n{}", String::from_utf8_lossy(&output.stderr)).unwrap();
+        write!(
+            msg,
+            " stdout:\n\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+        .unwrap();
+        write!(
+            msg,
+            " stderr:\n\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .unwrap();
 
         Err(format_err!(msg))
     }
@@ -66,8 +79,12 @@ pub fn create_dirs_if_needed(path: &Path) -> Result<()> {
         create_dirs_if_needed(parent)?;
     }
 
-    fs::create_dir(path)
-        .with_context(|| format_err!("Could not create directories for {}", path.to_string_lossy()))
+    fs::create_dir(path).with_context(|| {
+        format_err!(
+            "Could not create directories for {}",
+            path.to_string_lossy()
+        )
+    })
 }
 
 /// Runs a function with the `.cargo/config.toml` file removed for the duration
@@ -75,10 +92,13 @@ pub fn create_dirs_if_needed(path: &Path) -> Result<()> {
 /// instead of using our vendor/ directory as the source of truth. It should
 /// only be done for actions like adding or updating crates.
 pub fn without_cargo_config_toml<T>(
-    paths: &ChromiumPaths,
+    paths: &dyn GnrtPaths,
     f: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    let config_file = paths.third_party_cargo_root.join(".cargo").join("config.toml");
+    let config_file = paths
+        .third_party_cargo_root()
+        .join(".cargo")
+        .join("config.toml");
     let config_contents =
         std::fs::read_to_string(&config_file).context("reading .cargo/config.toml");
     if config_contents.is_ok() {
@@ -138,10 +158,16 @@ pub fn run_cargo_command(
     }
 
     log::debug!("invoking cargo {subcommand}");
-    let mut handle = command.spawn().with_context(|| format!("running cargo {subcommand}"))?;
+    let mut handle = command
+        .spawn()
+        .with_context(|| format!("running cargo {subcommand}"))?;
     let code = handle.wait().context("waiting for cargo process")?;
     if !code.success() {
-        Err(format_err!("cargo {} exited with status {}", subcommand, code))
+        Err(format_err!(
+            "cargo {} exited with status {}",
+            subcommand,
+            code
+        ))
     } else {
         Ok(())
     }
@@ -173,13 +199,20 @@ impl handlebars::HelperDef for IfKeyPresentHelper {
     ) -> handlebars::HelperResult {
         let param_not_found =
             |idx| handlebars::RenderErrorReason::ParamNotFoundForIndex("is_key_present", idx);
-        let key = h.param(0).and_then(|v| v.value().as_str()).ok_or(param_not_found(0))?;
+        let key = h
+            .param(0)
+            .and_then(|v| v.value().as_str())
+            .ok_or(param_not_found(0))?;
         let maybe_dict = h.param(1).ok_or(param_not_found(1))?;
         let contains_key = match maybe_dict.value().as_object() {
             None => false,
             Some(dict) => dict.contains_key(key),
         };
-        let template = if contains_key { h.template() } else { h.inverse() };
+        let template = if contains_key {
+            h.template()
+        } else {
+            h.inverse()
+        };
         match template {
             None => Ok(()),
             Some(t) => t.render(r, ctx, rc, out),
@@ -250,7 +283,12 @@ pub fn render_handlebars(
         data,
         output_path,
     )
-    .with_context(|| format!("Expanding handlebars template `{}`", template_path.display(),))
+    .with_context(|| {
+        format!(
+            "Expanding handlebars template `{}`",
+            template_path.display(),
+        )
+    })
 }
 
 pub fn render_handlebars_named_template(
@@ -266,7 +304,12 @@ pub fn render_handlebars_named_template(
             handlebars.render_to_write(template_name, data, buffered_output_file)?;
             Ok(())
         })
-        .with_context(|| format!("Expanding handlebars template into `{}`", output_path.display(),))
+        .with_context(|| {
+            format!(
+                "Expanding handlebars template into `{}`",
+                output_path.display(),
+            )
+        })
 }
 
 fn escape_for_handlebars(x: &str) -> String {
@@ -294,9 +337,18 @@ mod tests {
     #[test]
     fn test_string_excaping() {
         assert_eq!("foo bar", format!("{}", escape_for_handlebars("foo bar")));
-        assert_eq!("foo bar ", format!("{}", escape_for_handlebars("foo\nbar\n")));
-        assert_eq!(r#"foo \"bar\""#, format!("{}", escape_for_handlebars(r#"foo "bar""#)));
-        assert_eq!("foo 'bar'", format!("{}", escape_for_handlebars("foo 'bar'")));
+        assert_eq!(
+            "foo bar ",
+            format!("{}", escape_for_handlebars("foo\nbar\n"))
+        );
+        assert_eq!(
+            r#"foo \"bar\""#,
+            format!("{}", escape_for_handlebars(r#"foo "bar""#))
+        );
+        assert_eq!(
+            "foo 'bar'",
+            format!("{}", escape_for_handlebars("foo 'bar'"))
+        );
     }
 
     #[test]
@@ -318,6 +370,9 @@ mod tests {
         }
 
         assert_eq!("true", render(serde_json::json!({ "dict": { "foo": 456 }})));
-        assert_eq!("false", render(serde_json::json!({ "dict": { "bar": 456 }})));
+        assert_eq!(
+            "false",
+            render(serde_json::json!({ "dict": { "bar": 456 }}))
+        );
     }
 }

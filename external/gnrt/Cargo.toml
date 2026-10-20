@@ -4,6 +4,11 @@ version = "0.0.0"
 edition = "2021"
 build = "build/build.rs"
 
+[features]
+default = ["blueos"]
+blueos = []
+chromium = []
+
 [lib]
 name = "gnrt_lib"
 path = "lib/lib.rs"

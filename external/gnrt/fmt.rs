@@ -11,12 +11,13 @@ use std::path::Path;
 use toml_edit::DocumentMut;
 
 /// Implementation of `gnrt fmt ...` command.
-pub fn format(paths: &paths::ChromiumPaths) -> Result<()> {
-    format_file(paths.third_party_config_file, &GNRT_CONFIG_FORMAT_OPTIONS)?;
+pub fn format(paths: &dyn paths::GnrtPaths) -> Result<()> {
+    format_file(paths.third_party_config_file(), &GNRT_CONFIG_FORMAT_OPTIONS)?;
 
-    let cargo_toml_options =
-        FormatOptions { toplevel_table_order: &["package", "workspace", "dependencies", "patch"] };
-    let cargo_toml_path = paths.third_party_cargo_root.join("Cargo.toml");
+    let cargo_toml_options = FormatOptions {
+        toplevel_table_order: &["package", "workspace", "dependencies", "patch"],
+    };
+    let cargo_toml_path = paths.third_party_cargo_root().join("Cargo.toml");
     format_file(&cargo_toml_path, &cargo_toml_options)?;
 
     Ok(())

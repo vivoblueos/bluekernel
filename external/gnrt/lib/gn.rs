@@ -124,7 +124,7 @@ pub enum NameLibStyle {
 
 pub fn build_file_from_deps<'a, 'b, Iter, GetFiles>(
     deps: Iter,
-    paths: &'b paths::ChromiumPaths,
+    paths: &'b dyn paths::GnrtPaths,
     extra_config: &'b BuildConfig,
     name_lib_style: NameLibStyle,
     get_files: GetFiles,
@@ -149,13 +149,16 @@ where
 
 pub fn build_rule_from_dep(
     dep: &deps::Package,
-    paths: &paths::ChromiumPaths,
+    paths: &dyn paths::GnrtPaths,
     details: &CrateFiles,
     extra_config: &BuildConfig,
     name_lib_style: NameLibStyle,
 ) -> Result<Vec<Rule>> {
-    let cargo_pkg_authors =
-        if dep.authors.is_empty() { None } else { Some(dep.authors.join(", ")) };
+    let cargo_pkg_authors = if dep.authors.is_empty() {
+        None
+    } else {
+        Some(dep.authors.join(", "))
+    };
     let per_crate_config = extra_config.get_crate_config(&dep.package_name, &dep.version);
     let normalized_crate_name = NormalizedName::from_crate_name(&dep.package_name);
     let crate_epoch = Epoch::from_version(&dep.version);
@@ -239,14 +242,24 @@ pub fn build_rule_from_dep(
     // first.
     detail_template.deps = group_deps(&normal_deps, create_package_id)
         .with_context(|| format!("Error processing dependencies of {}", dep.package_name))?;
-    detail_template.build_deps = group_deps(&build_deps, create_package_id)
-        .with_context(|| format!("Error processing build dependencies of {}", dep.package_name))?;
+    detail_template.build_deps = group_deps(&build_deps, create_package_id).with_context(|| {
+        format!(
+            "Error processing build dependencies of {}",
+            dep.package_name
+        )
+    })?;
     detail_template.aliased_deps = aliased_normal_deps;
 
-    detail_template.sources =
-        details.sources.iter().map(|p| format!("//{}", paths.to_gn_abs_path(p).unwrap())).collect();
-    detail_template.inputs =
-        details.inputs.iter().map(|p| format!("//{}", paths.to_gn_abs_path(p).unwrap())).collect();
+    detail_template.sources = details
+        .sources
+        .iter()
+        .map(|p| format!("//{}", paths.to_gn_abs_path(p).unwrap()))
+        .collect();
+    detail_template.inputs = details
+        .inputs
+        .iter()
+        .map(|p| format!("//{}", paths.to_gn_abs_path(p).unwrap()))
+        .collect();
     detail_template.native_libs = details
         .native_libs
         .iter()
@@ -281,20 +294,32 @@ pub fn build_rule_from_dep(
         let mut actual_features = HashSet::new();
         actual_features.extend(requested_features_for_normal.iter().map(Deref::deref));
         actual_features.extend(requested_features_for_build.iter().map(Deref::deref));
-        banned_features.intersection(&actual_features).copied().sorted_unstable().collect()
+        banned_features
+            .intersection(&actual_features)
+            .copied()
+            .sorted_unstable()
+            .collect()
     };
     if !unexpected_features.is_empty() {
         bail!(
             "The following crate features are enabled in crate `{}` \
              despite being listed in `ban_features`: {}",
             &*dep.package_name,
-            unexpected_features.iter().map(|f| format!("`{f}`")).join(", "),
+            unexpected_features
+                .iter()
+                .map(|f| format!("`{f}`"))
+                .join(", "),
         );
     }
 
-    if !per_crate_config.map(|config| config.remove_build_rs).unwrap_or(false) {
-        let build_script_from_src =
-            dep.build_script.as_ref().map(|p| paths.to_gn_abs_path(p).unwrap());
+    if !per_crate_config
+        .map(|config| config.remove_build_rs)
+        .unwrap_or(false)
+    {
+        let build_script_from_src = dep
+            .build_script
+            .as_ref()
+            .map(|p| paths.to_gn_abs_path(p).unwrap());
 
         detail_template.build_root = build_script_from_src.as_ref().map(|p| format!("//{p}"));
         detail_template.build_script_sources = build_script_from_src
@@ -337,13 +362,19 @@ pub fn build_rule_from_dep(
         if dep.lib_target.is_some() {
             bin_detail.dep_on_lib = true;
             if bin_detail.deps.is_empty() {
-                bin_detail.deps.push(DepGroup { cond: None, packages: Vec::new() });
+                bin_detail.deps.push(DepGroup {
+                    cond: None,
+                    packages: Vec::new(),
+                });
             }
         }
 
         rules.push(Rule {
             name: NormalizedName::from_crate_name(&bin_target.name).to_string(),
-            gn_visibility: GnVisibility { testonly: dep.group == Group::Test, public: true },
+            gn_visibility: GnVisibility {
+                testonly: dep.group == Group::Test,
+                public: true,
+            },
             detail: bin_detail,
         });
     }
@@ -427,8 +458,10 @@ fn group_deps(
         groups.entry(None).or_default();
     }
 
-    let mut groups: Vec<DepGroup> =
-        groups.into_iter().map(|(cond, packages)| DepGroup { cond, packages }).collect();
+    let mut groups: Vec<DepGroup> = groups
+        .into_iter()
+        .map(|(cond, packages)| DepGroup { cond, packages })
+        .collect();
 
     for group in groups.iter_mut() {
         group.packages.sort_unstable();

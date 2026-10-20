@@ -4,7 +4,7 @@
 
 use crate::config::BuildConfig;
 use crate::group::Group;
-use crate::paths::{self, get_build_dir_for_package, get_vendor_dir_for_package};
+use crate::paths::{self};
 use anyhow::{bail, ensure, format_err, Context, Result};
 use guppy::graph::PackageMetadata;
 use guppy::PackageId;
@@ -37,7 +37,7 @@ pub struct ReadmeFile {
 /// consumed by a handlebars template.
 pub fn readme_files_from_packages<'a>(
     deps: impl IntoIterator<Item = &'a PackageMetadata<'a>>,
-    paths: &paths::ChromiumPaths,
+    paths: &dyn paths::GnrtPaths,
     extra_config: &BuildConfig,
     mut find_group: impl FnMut(&'a PackageId) -> Group,
     mut find_security_critical: impl FnMut(&'a PackageId) -> Option<bool>,
@@ -69,14 +69,14 @@ pub fn readme_files_from_packages<'a>(
 
 fn readme_file_from_package<'a>(
     package: &'a PackageMetadata<'a>,
-    paths: &paths::ChromiumPaths,
+    paths: &dyn paths::GnrtPaths,
     extra_config: &BuildConfig,
     find_group: &mut dyn FnMut(&'a PackageId) -> Group,
     find_security_critical: &mut dyn FnMut(&'a PackageId) -> Option<bool>,
     find_shipped: &mut dyn FnMut(&'a PackageId) -> Option<bool>,
 ) -> Result<(PathBuf, ReadmeFile)> {
-    let crate_build_dir = get_build_dir_for_package(paths, package.name(), package.version());
-    let crate_vendor_dir = get_vendor_dir_for_package(paths, package.name(), package.version());
+    let crate_build_dir = paths.get_build_dir_for_package(package.name(), package.version());
+    let crate_vendor_dir = paths.get_vendor_dir_for_package(package.name(), package.version());
 
     let crate_config = extra_config.get_crate_config(package.name(), package.version());
     let group = find_group(package.id());
@@ -122,7 +122,8 @@ fn readme_file_from_package<'a>(
 
     let revision = {
         if let Ok(file) = std::fs::File::open(
-            get_vendor_dir_for_package(paths, package.name(), package.version())
+            paths
+                .get_vendor_dir_for_package(package.name(), package.version())
                 .join(".cargo_vcs_info.json"),
         ) {
             #[derive(Deserialize)]
@@ -422,7 +423,10 @@ fn find_license_files_for_kinds(
 
     // Check for duplicates in values using itertools.
     if found_files.values().duplicates().count() > 0 {
-        bail!("Duplicate license files found: {:?}", found_files.values().collect::<Vec<_>>());
+        bail!(
+            "Duplicate license files found: {:?}",
+            found_files.values().collect::<Vec<_>>()
+        );
     }
 
     Ok(found_files)
@@ -437,7 +441,12 @@ fn does_license_file_exist(path: &Path) -> Result<bool> {
                     .map(|canonical_path| canonical_path.file_name() == path.file_name())
                     .unwrap_or(false)
         })
-        .with_context(|| format!("Failed to check if a license file exists at {}", path.display()))
+        .with_context(|| {
+            format!(
+                "Failed to check if a license file exists at {}",
+                path.display()
+            )
+        })
 }
 
 #[cfg(test)]
@@ -456,7 +465,10 @@ mod test {
             ("Apache-2.0 / MIT", "Apache-2.0"),
             ("Apache-2.0 OR MIT", "Apache-2.0"),
             ("Apache-2.0/MIT", "Apache-2.0"),
-            ("(Apache-2.0 OR MIT) AND BSD-3-Clause", "Apache-2.0, BSD-3-Clause"),
+            (
+                "(Apache-2.0 OR MIT) AND BSD-3-Clause",
+                "Apache-2.0, BSD-3-Clause",
+            ),
             ("MIT OR Apache-2.0 OR Zlib", "Apache-2.0"),
             ("(MIT OR Apache-2.0) AND NCSA", "Apache-2.0, NCSA"),
             ("MIT", "MIT"),
@@ -469,9 +481,15 @@ mod test {
             ("MIT OR Zlib OR Apache-2.0", "Apache-2.0"),
             ("Zlib OR Apache-2.0 OR MIT", "Apache-2.0"),
             ("0BSD OR MIT OR Apache-2.0", "Apache-2.0"),
-            ("(MIT OR Apache-2.0) AND Unicode-3.0", "Apache-2.0, Unicode-3.0"),
+            (
+                "(MIT OR Apache-2.0) AND Unicode-3.0",
+                "Apache-2.0, Unicode-3.0",
+            ),
             ("MIT AND (MIT OR Apache-2.0)", "MIT"),
-            ("Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT", "Apache-2.0"),
+            (
+                "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+                "Apache-2.0",
+            ),
             ("BSD-2-Clause OR Apache-2.0 OR MIT", "Apache-2.0"),
             ("BSD-2-Clause OR Apache-2.0 OR MIT", "Apache-2.0"),
             ("BSD-2-Clause OR MIT OR Apache-2.0", "Apache-2.0"),
@@ -579,8 +597,10 @@ mod test {
                 Some(self.pkg_license),
             )?;
 
-            let temp_dir_prefix =
-                format!("//{}", crate::paths::normalize_unix_path_separator(self.temp_dir.path()),);
+            let temp_dir_prefix = format!(
+                "//{}",
+                crate::paths::normalize_unix_path_separator(self.temp_dir.path()),
+            );
             let stripped_result = result
                 .into_iter()
                 .map(|path| {
@@ -616,7 +636,10 @@ mod test {
         let result = test.get_license_files(None).unwrap();
         assert_eq!(
             &result,
-            &["//test-crate-vendor-dir/LICENSE-Apache", "//test-crate-vendor-dir/LICENSE-UNICODE",]
+            &[
+                "//test-crate-vendor-dir/LICENSE-Apache",
+                "//test-crate-vendor-dir/LICENSE-UNICODE",
+            ]
         );
     }
 
@@ -626,8 +649,13 @@ mod test {
         let license_file = "LICENSE.foo";
         test.add_vendor_file(license_file);
 
-        let result = test.get_license_files(Some(&[license_file.to_string()])).unwrap();
-        assert_eq!(&result, &[format!("//test-crate-vendor-dir/{license_file}")]);
+        let result = test
+            .get_license_files(Some(&[license_file.to_string()]))
+            .unwrap();
+        assert_eq!(
+            &result,
+            &[format!("//test-crate-vendor-dir/{license_file}")]
+        );
     }
 
     #[test]
