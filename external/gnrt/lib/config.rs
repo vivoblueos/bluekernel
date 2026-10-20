@@ -217,8 +217,13 @@ pub struct CollectConfig {
     pub declaration_files: Vec<std::path::PathBuf>,
 }
 
+/// Returns the conventional host toolchain label when configuration omits it.
+fn default_host_toolchain() -> String {
+    "//build/toolchain:host".to_owned()
+}
+
 /// Configures GN output for this session.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GnConfig {
     /// Path to a handlebars template for an output GN build file. The path is
@@ -237,6 +242,21 @@ pub struct GnConfig {
     /// don't want to vendor. This is the src/lib.rs file.
     #[serde(default)]
     pub removed_librs_template: std::path::PathBuf,
+    /// Host toolchain used when declaration metadata does not specify one.
+    #[serde(default = "default_host_toolchain")]
+    pub host_toolchain: String,
+}
+
+impl Default for GnConfig {
+    fn default() -> Self {
+        Self {
+            build_file_template: Default::default(),
+            readme_file_template: Default::default(),
+            removed_cargo_template: Default::default(),
+            removed_librs_template: Default::default(),
+            host_toolchain: default_host_toolchain(),
+        }
+    }
 }
 
 /// Configures Cargo Vet output for this session.
@@ -350,6 +370,9 @@ pub struct CrateConfig {
 
     #[serde(default)]
     pub group: Option<Group>,
+    /// Overrides the manifest edition used to compile generated targets.
+    #[serde(default)]
+    pub edition: Option<String>,
     /// Patch files to apply to the vendored crate after `cargo vendor`,
     /// regardless of how the crate was declared. Paths are GN-root-relative,
     /// matching `patches` on a `cargo_spec` declaration. Use this for crates
@@ -384,6 +407,20 @@ pub struct CrateConfig {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn gn_host_toolchain_defaults_and_overrides() {
+        let config: BuildConfig = toml::from_str("").unwrap();
+        assert_eq!(config.gn_config.host_toolchain, "//build/toolchain:host");
+        let config: BuildConfig =
+            toml::from_str("[gn]\nbuild_file_template = \"rules.hbs\"\n").unwrap();
+        assert_eq!(config.gn_config.host_toolchain, "//build/toolchain:host");
+        let config: BuildConfig = toml::from_str(
+            "[gn]\nbuild_file_template = \"rules.hbs\"\nhost_toolchain = \"//custom:host\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.gn_config.host_toolchain, "//custom:host");
+    }
 
     #[test]
     fn resolve_cargo_lockfile_is_project_root_relative() {

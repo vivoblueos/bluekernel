@@ -10,7 +10,10 @@ pub mod condition;
 pub mod config;
 pub mod crates;
 pub mod deps;
+pub mod generate;
 pub mod gn;
+/// Represents conditions rendered through project GN templates.
+pub mod gn_condition;
 pub mod group;
 pub mod inherit;
 pub mod manifest;
@@ -18,6 +21,7 @@ pub mod package;
 pub mod paths;
 pub mod readme;
 pub mod resolve;
+pub mod selector;
 pub mod sync_context;
 pub mod target_triple {
     include!(concat!(env!("OUT_DIR"), "/target_triple.rs"));

@@ -70,6 +70,7 @@
 # fields correspond to per-crate options like `extra_input_roots`).
 
 [gn]
+host_toolchain = "//build/toolchain:host"
 build_file_template = "BLUE_BUILD.gn.hbs"
 readme_file_template = "README.blueos.hbs"
 removed_cargo_template = "removed_Cargo.toml.hbs"

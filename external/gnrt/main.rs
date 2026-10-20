@@ -42,7 +42,7 @@ enum Command {
     #[command(about = "Download all third-party crate dependencies in //third_party/rust")]
     Vendor(VendorCommandArgs),
 
-    #[command(about = "Collect declarations and resolve Cargo dependency features")]
+    #[command(about = "Prepare Rust dependencies and generate GN build rules")]
     Sync(SyncCommandArgs),
 }
 

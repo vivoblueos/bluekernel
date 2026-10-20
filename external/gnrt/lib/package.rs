@@ -22,7 +22,7 @@ use crate::collect::ConfigurableValue;
 use crate::deps::{BinTarget, LibTarget};
 use crate::group::Group;
 use semver::Version;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// A resolved package recipe within a declaration feature closure.
@@ -123,7 +123,7 @@ pub struct FeatureGroup {
 }
 
 /// The host or target context used to resolve dependency edges and features.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResolutionContext {
     /// Compiled for the target.

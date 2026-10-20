@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Process and path helpers for GN collection and Cargo resolution.
+//! Process, path, and template helpers for crate synchronization.
 
+use crate::gn_condition::GnConditionHelper;
 use anyhow::{bail, ensure, Context, Result};
+use handlebars::{handlebars_helper, JsonTruthy};
+use serde::Serialize;
 use std::io::Write;
 use std::{
     fs,
@@ -227,4 +230,84 @@ pub fn gn_path_label_to_path(root: &Path, label: &str) -> Result<PathBuf> {
         .strip_prefix("//")
         .with_context(|| format!("path {label} is not a root-relative GN path"))?;
     Ok(root.join(relative))
+}
+
+/// Loads GN templates into a strict Handlebars registry.
+///
+/// Registers GN condition rendering, string escaping, and value helpers.
+///
+/// # Errors
+///
+/// Returns an error if a template path is not UTF-8 or a template cannot be
+/// read or parsed.
+pub fn init_handlebars_with_template_paths(
+    template_paths: &[&Path],
+) -> Result<handlebars::Handlebars<'static>> {
+    let mut registry = handlebars::Handlebars::new();
+    registry.set_strict_mode(true);
+    registry.register_escape_fn(handlebars::no_escape);
+    // GN expressions are emitted verbatim; only quoted strings use gn_escape.
+    handlebars_helper!(gn_escape: |value: String| {
+        value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")
+    });
+    handlebars_helper!(eq: |a: String, b: String| a == b);
+    handlebars_helper!(any: |a: Json, b: Json| a.is_truthy(false) || b.is_truthy(false));
+    registry.register_helper("gn_condition", Box::new(GnConditionHelper));
+    registry.register_helper("gn_escape", Box::new(gn_escape));
+    registry.register_helper("eq", Box::new(eq));
+    registry.register_helper("any", Box::new(any));
+    for path in template_paths {
+        let name = path.to_str().context("template path is not UTF-8")?;
+        registry
+            .register_template_file(name, path)
+            .with_context(|| format!("loading template {}", path.display()))?;
+    }
+    Ok(registry)
+}
+
+/// Renders a registered template into an output file.
+///
+/// # Errors
+///
+/// Returns an error if the template path is not UTF-8, rendering fails, or the
+/// output file cannot be created or written.
+pub fn render_handlebars(
+    registry: &handlebars::Handlebars,
+    template_path: &Path,
+    data: &impl Serialize,
+    output_path: &Path,
+) -> Result<()> {
+    let name = template_path
+        .to_str()
+        .context("template path is not UTF-8")?;
+    let output = fs::File::create(output_path)
+        .with_context(|| format!("creating {}", output_path.display()))?;
+    let mut writer = std::io::BufWriter::new(output);
+    registry
+        .render_to_write(name, data, &mut writer)
+        .with_context(|| format!("rendering template {}", template_path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("writing {}", output_path.display()))
+}
+
+/// Formats a generated GN file with the configured GN executable.
+///
+/// # Errors
+///
+/// Returns an error if GN cannot be found, cannot start, or rejects the file.
+pub fn format_gn_file(path: &Path) -> Result<()> {
+    let output = process::Command::new(tool_path("gn")?)
+        .arg("format")
+        .arg(path)
+        .output()
+        .with_context(|| format!("starting gn format for {}", path.display()))?;
+    ensure!(
+        output.status.success(),
+        "gn format failed for {}: {}\n{}",
+        path.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
 }

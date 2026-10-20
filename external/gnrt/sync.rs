@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Collects GN declarations and resolves host and target crate features.
+//! Collects GN declarations, resolves crates, and generates GN build rules.
 //!
 //! The current working directory is the project root and must contain `.gn`.
 
 use crate::collect;
 use crate::config::BuildConfig;
+use crate::generate;
 use crate::paths;
 use crate::resolve;
 use crate::SyncCommandArgs;
 use anyhow::{bail, Context, Result};
 
-/// Collects declarations and resolves their Cargo dependency features.
+/// Collects declarations, resolves crate features, and generates GN rules.
 ///
 /// # Errors
 ///
 /// Returns an error if the project root has no `.gn` file, configuration cannot
-/// be loaded, or collection or dependency resolution fails.
+/// be loaded, or collection, resolution, or GN rule generation fails.
 pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
     if !paths.root().join(".gn").is_file() {
         bail!(
@@ -38,7 +39,7 @@ pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
     }
     let build_out_dir = paths.root().join(&args.out);
 
-    println!("Collecting and resolving GN dependency declarations ...");
+    println!("Synchronizing crates and generating GN build rules ...");
     println!("  GN root: {}", paths.root().display());
     println!("  build output: {}", build_out_dir.display());
 
@@ -55,8 +56,9 @@ pub fn sync(args: SyncCommandArgs, paths: &dyn paths::GnrtPaths) -> Result<()> {
     )
     .context("GN declaration collection failed")?;
     resolve::resolve(&mut context, paths, &gnrt_dir)?;
+    generate::generate(&context, paths).context("GN rule generation failed")?;
 
-    println!("dependency resolution completed successfully.");
+    println!("GN rule generation completed successfully.");
 
     Ok(())
 }
