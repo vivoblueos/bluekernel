@@ -34,7 +34,10 @@ pub struct GroupParseError;
 impl std::error::Error for GroupParseError {}
 impl std::fmt::Display for GroupParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "failed ot parse group, should be one of: safe|sandbox|test")
+        write!(
+            f,
+            "failed to parse group, should be one of: safe|sandbox|test"
+        )
     }
 }
 
