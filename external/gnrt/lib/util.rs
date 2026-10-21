@@ -15,7 +15,8 @@
 //! Process, path, and template helpers for crate synchronization.
 
 use crate::gn_condition::GnConditionHelper;
-use anyhow::{bail, ensure, Context, Result};
+use crate::sync_state::tool_path;
+use anyhow::{ensure, Context, Result};
 use handlebars::{handlebars_helper, JsonTruthy};
 use serde::Serialize;
 use std::io::Write;
@@ -109,40 +110,6 @@ fn strip_rustup_routing(args: &mut Vec<String>) -> Option<String> {
     toolchain
 }
 
-fn tool_path(name: &str) -> Result<PathBuf> {
-    let variable = match name {
-        "cargo" => Some("GNRT_CARGO_BIN"),
-        "gn" => Some("GNRT_GN_BIN"),
-        "rustc" => Some("GNRT_RUSTC_BIN"),
-        _ => None,
-    };
-    if let Some(value) = variable.and_then(std::env::var_os) {
-        let value = PathBuf::from(value);
-        if value.is_file() {
-            return Ok(value);
-        }
-        if value.components().count() > 1 {
-            bail!(
-                "configured {name} executable is missing: {}",
-                value.display()
-            );
-        }
-        return find_on_path(&value.to_string_lossy());
-    }
-    find_on_path(name)
-}
-
-fn find_on_path(name: &str) -> Result<PathBuf> {
-    if Path::new(name).is_file() {
-        return Ok(PathBuf::from(name));
-    }
-    let search = std::env::var_os("PATH").context("PATH is not set")?;
-    std::env::split_paths(&search)
-        .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
-        .with_context(|| format!("{name} not found in PATH"))
-}
-
 fn check_exit_ok(output: &process::Output, description: &str) -> Result<()> {
     ensure!(
         output.status.success(),
@@ -176,47 +143,7 @@ pub fn create_dirs_if_needed(path: &Path) -> Result<()> {
 ///
 /// Returns an error if GN cannot be run or the arguments are invalid.
 pub fn normalize_gn_args(args: &[String]) -> Result<String> {
-    let source = args.join(" ");
-    if source.trim().is_empty() {
-        return Ok(String::new());
-    }
-    let mut child = process::Command::new(tool_path("gn")?)
-        .args(["format", "--stdin"])
-        .stdin(process::Stdio::piped())
-        .stdout(process::Stdio::piped())
-        .stderr(process::Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .context("GN formatter stdin unavailable")?
-        .write_all(source.as_bytes())?;
-    let output = child.wait_with_output()?;
-    ensure!(
-        output.status.success(),
-        "invalid GN arguments: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let formatted = String::from_utf8(output.stdout)?;
-    let mut lines = Vec::new();
-    let mut skip_value = false;
-    for line in formatted.lines() {
-        let trimmed = line.trim();
-        if skip_value {
-            skip_value = false;
-            continue;
-        }
-        if trimmed.starts_with("gnrt_mode =") {
-            skip_value = trimmed.ends_with('=');
-            continue;
-        }
-        lines.push(line);
-    }
-    if lines.is_empty() {
-        Ok(String::new())
-    } else {
-        Ok(format!("{}\n", lines.join("\n")))
-    }
+    crate::sync_state::normalize_args(args)
 }
 
 /// Joins a root-relative GN path label such as `//kernel/Cargo.lock` to the

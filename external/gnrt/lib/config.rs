@@ -47,6 +47,8 @@ pub fn parse_crate_key(key: &str) -> Result<(&str, Option<Epoch>)> {
 pub struct BuildConfig {
     /// Settings for collecting declarations from GN.
     pub collect: CollectConfig,
+    /// Additional files, environment values, and tools to fingerprint.
+    pub fingerprint: FingerprintConfig,
     /// Settings that affect Cargo dependency resolution.
     pub resolve: ResolveConfig,
     #[serde(rename = "gn")]
@@ -215,6 +217,18 @@ fn validate_conditional_removals(path: &str, removals: &[ConditionalRemoval]) ->
 pub struct CollectConfig {
     /// Project-root-relative BUILD.gn files containing Cargo declarations.
     pub declaration_files: Vec<std::path::PathBuf>,
+}
+
+/// Additional inputs not tracked by GN's dependency file.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FingerprintConfig {
+    /// Project-root-relative files or directories included in the sync record.
+    pub files: Vec<std::path::PathBuf>,
+    /// Environment variables whose values affect sync.
+    pub environment: Vec<String>,
+    /// Executables whose contents affect sync.
+    pub tools: Vec<String>,
 }
 
 /// Returns the conventional host toolchain label when configuration omits it.
@@ -407,6 +421,22 @@ pub struct CrateConfig {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn fingerprints_default_to_empty_and_accept_explicit_inputs() {
+        let config: BuildConfig = toml::from_str("").unwrap();
+        assert!(config.fingerprint.files.is_empty());
+        assert!(config.fingerprint.environment.is_empty());
+        assert!(config.fingerprint.tools.is_empty());
+
+        let config: BuildConfig = toml::from_str(
+            "[fingerprint]\nfiles = [\"settings.txt\"]\nenvironment = [\"RUSTFLAGS\"]\ntools = [\"python3\"]\n",
+        )
+        .unwrap();
+        assert_eq!(config.fingerprint.files, [Path::new("settings.txt")]);
+        assert_eq!(config.fingerprint.environment, ["RUSTFLAGS"]);
+        assert_eq!(config.fingerprint.tools, ["python3"]);
+    }
 
     #[test]
     fn gn_host_toolchain_defaults_and_overrides() {

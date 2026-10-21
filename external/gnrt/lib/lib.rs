@@ -23,6 +23,8 @@ pub mod readme;
 pub mod resolve;
 pub mod selector;
 pub mod sync_context;
+/// Fingerprints sync inputs and publishes recoverable updates.
+pub mod sync_state;
 pub mod target_triple {
     include!(concat!(env!("OUT_DIR"), "/target_triple.rs"));
 }

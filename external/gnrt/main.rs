@@ -119,16 +119,22 @@ struct SyncCommandArgs {
         long,
         name = "OUT",
         default_value = "out/gnrt-sync",
-        help = " \
-        GN build output directory, relative to the current working directory. \
-        This is the directory passed to `gn gen`, e.g. `out/blueos_release`."
+        help = "Store intermediate synchronization files in this directory, relative to the project root."
     )]
     out: PathBuf,
-    #[arg(long, help = "Prepare all registered crate declarations.")]
+    #[arg(
+        long,
+        help = "Synchronize dependencies from all registered crate declarations."
+    )]
     all: bool,
     // FIXME: Enable --target only when nested GN graphs can be collected completely.
     #[arg(skip)]
     target: Option<String>,
+    #[arg(
+        long,
+        help = "Validate the saved synchronization record without downloading dependency sources or generating GN build files."
+    )]
+    check: bool,
     #[arg(
         long,
         name = "ARGS",
@@ -201,6 +207,7 @@ mod tests {
         };
         assert_eq!(args.out, PathBuf::from("out/gnrt-sync"));
         assert!(args.target.is_none());
+        assert!(!args.check);
         assert!(args.args.is_empty());
     }
 
@@ -209,6 +216,20 @@ mod tests {
         let error =
             GnrtArgs::try_parse_from(["gnrt", "sync", "--target", "//app:app"]).unwrap_err();
         assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn sync_check_accepts_full_catalog_validation() {
+        let Command::Sync(args) = GnrtArgs::try_parse_from(["gnrt", "sync", "--all", "--check"])
+            .unwrap()
+            .command
+        else {
+            panic!("expected sync");
+        };
+        assert!(args.all);
+        assert!(args.check);
+        assert!(args.target.is_none());
+        assert!(GnrtArgs::try_parse_from(["gnrt", "verify"]).is_err());
     }
 
     #[test]
