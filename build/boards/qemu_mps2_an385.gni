@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-board_default_toolchain = "//build/toolchain:blueos_thumbv7m"
+board_default_toolchain = "blueos_thumbv7m"
 default_linker_script = "${root_gen_dir}/link.pre.ld"
 qemu_exe = "qemu-system-arm"
 qemu_machine = "mps2-an385"
-rust_abi_target = "thumbv7m-none-eabi"
+
 qemu_extra_args = []
 qemu_net_args = []
 qemu_block_args = []

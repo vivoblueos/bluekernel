@@ -97,7 +97,6 @@ fn write(root: &Path, path: &str, source: &str) {
 }
 
 #[test]
-#[ignore = "requires native Cargo alias and build-script context integration"]
 fn native_bindings_preserve_aliases_domains_and_build_script_outputs() {
     if let Some(reason) = missing_prerequisite() {
         panic!("native binding prerequisites are unavailable: {reason}");

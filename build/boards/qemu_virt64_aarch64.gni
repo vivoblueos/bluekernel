@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-board_default_toolchain = "//build/toolchain:blueos_aarch64"
+board_default_toolchain = "blueos_aarch64"
 default_linker_script = "${root_gen_dir}/link.pre.ld"
 qemu_exe = "qemu-system-aarch64"
 qemu_machine = "virt,virtualization=on,gic-version=3"
-rust_abi_target = "aarch64-unknown-none"
+
 qemu_extra_args = [
   "-cpu",
   "cortex-a53",

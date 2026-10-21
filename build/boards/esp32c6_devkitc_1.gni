@@ -19,7 +19,7 @@ declare_args() {
 # ESP32-C6 (rv32imac) reuses the existing imac toolchain — the rustc target
 # `riscv32-vivo-blueos` already carries the `+a` atomic extension. See
 # build/toolchain/BUILD.gn:blueos_riscv32imac (also used by gd32vw553_eval).
-board_default_toolchain = "//build/toolchain:blueos_riscv32imac"
+board_default_toolchain = "blueos_riscv32imac"
 default_linker_script = "//kernel/kernel/src/boards/${board}/link.x"
 
 # NOTE: the Espressif qemu fork (`qemu-esp32-riscv32`) is not installed on this
@@ -29,7 +29,7 @@ default_linker_script = "//kernel/kernel/src/boards/${board}/link.x"
 # runs through Wokwi instead. See memory/qemu-esp32-fork-missing.md.
 qemu_exe = "qemu-esp32-riscv32"
 qemu_machine = "esp32c6"
-rust_abi_target = "riscv32"
+
 qemu_extra_args = []
 qemu_net_args = []
 qemu_block_args = []
@@ -37,8 +37,8 @@ qemu_block_args = []
 qemu_esp32_bootloader_bin = ""
 qemu_esp32_partition_table_bin = ""
 
-# WiFi/net driver dependencies. Structurally identical to seeed_xiao_esp32c3.gni,
-# only swapping the c3-specific crates for c6:
+# WiFi/net driver dependencies. Structurally identical to
+# seeed_xiao_esp32c3.gni, only swapping the c3-specific crates for c6:
 #   esp-wifi-sys-esp32c3-0.2.0 → esp-wifi-sys-esp32c6-0.2.0
 #   esp32c3-0.32.2            → esp32c6-0.23.0
 # The remaining 7 (esp-hal/esp-phy/esp-radio-rtos-driver/esp-rom-sys/esp-sync/

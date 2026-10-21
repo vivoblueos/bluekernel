@@ -19,11 +19,11 @@ declare_args() {
   use_bme280 = true
 }
 
-board_default_toolchain = "//build/toolchain:blueos_thumbv8m"
+board_default_toolchain = "blueos_thumbv8m"
 default_linker_script = "${root_gen_dir}/link.pre.ld"
 qemu_exe = ""
 qemu_machine = ""
-rust_abi_target = "thumbv8m.main-none-eabihf"
+
 qemu_extra_args = []
 qemu_net_args = []
 qemu_block_args = []
