@@ -16,6 +16,9 @@ use crate::sync::spinlock::SpinLock;
 use allocator_crate::{slab::SlabHeap as Slab, MemoryInfo};
 use core::{alloc::Layout, ptr::NonNull};
 
+#[cfg(allocator = "slab_dynamic")]
+use allocator_crate::buddy::{BuddyAllocator, PAGE_SHIFT, PAGE_SIZE};
+
 pub type Heap = SlabHeap<2, 4, 2, 1, 1, 1, 1, 1, 1, 1>;
 pub struct SlabHeap<
     const S8: usize,
@@ -89,7 +92,7 @@ impl<
         layout: Layout,
         new_size: usize,
     ) -> Option<NonNull<u8>> {
-        let new_layout = Layout::from_size_align_unchecked(new_size, layout.align());
+        let new_layout = Layout::from_size_align(new_size, layout.align()).ok()?;
         let mut heap = self.heap.irqsave_lock();
         heap.reallocate(NonNull::new_unchecked(ptr), &new_layout)
     }
@@ -175,11 +178,50 @@ impl DynamicSlabHeap {
         }
     }
 
+    /// Initialize dynamic slab and its internal buddy backend.
+    ///
     /// # Safety
-    /// `start_addr..start_addr+size` must be valid, exclusively owned, writable memory.
+    /// `start_addr..start_addr + size` must be valid, exclusively owned,
+    /// writable memory. Initialization must happen exactly once.
     pub unsafe fn init(&self, start_addr: usize, size: usize) {
+        let end_addr = start_addr.checked_add(size).expect("heap end overflow");
+        let page_base = checked_align_up(start_addr, PAGE_SIZE).expect("heap base overflow");
+        assert!(page_base < end_addr);
+        let page_count = (end_addr - page_base) >> PAGE_SHIFT;
+        let buddy_layout =
+            BuddyAllocator::metadata_layout(page_count).expect("invalid buddy metadata layout");
+        let slab_layout =
+            DynHeap::metadata_layout(page_count).expect("invalid dynamic slab metadata layout");
+
+        let buddy_metadata_start = checked_align_up(page_base, buddy_layout.align())
+            .expect("buddy metadata address overflow");
+        let buddy_metadata_end = buddy_metadata_start
+            .checked_add(buddy_layout.size())
+            .expect("buddy metadata end overflow");
+        let slab_metadata_start = checked_align_up(buddy_metadata_end, slab_layout.align())
+            .expect("dynamic slab metadata address overflow");
+        let slab_metadata_end = slab_metadata_start
+            .checked_add(slab_layout.size())
+            .expect("dynamic slab metadata end overflow");
+        let manageable_virt_start = checked_align_up(slab_metadata_end, PAGE_SIZE)
+            .expect("manageable memory address overflow");
+        assert!(slab_metadata_end <= end_addr);
+        let manageable_start_pfn = (manageable_virt_start - page_base) >> PAGE_SHIFT;
+        assert!(manageable_start_pfn < page_count);
+
         let mut heap = self.heap.irqsave_lock();
-        heap.init(start_addr, size);
+        heap.init_with_buddy(
+            NonNull::new(slab_metadata_start as *mut u8)
+                .expect("dynamic slab metadata pointer must not be null"),
+            slab_layout.size(),
+            NonNull::new(buddy_metadata_start as *mut u8)
+                .expect("buddy metadata pointer must not be null"),
+            buddy_layout.size(),
+            page_base,
+            page_count,
+            manageable_start_pfn..page_count,
+        )
+        .expect("failed to initialize dynamic slab with buddy");
     }
 
     pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
@@ -209,7 +251,7 @@ impl DynamicSlabHeap {
         layout: Layout,
         new_size: usize,
     ) -> Option<NonNull<u8>> {
-        let new_layout = Layout::from_size_align_unchecked(new_size, layout.align());
+        let new_layout = Layout::from_size_align(new_size, layout.align()).ok()?;
         let mut heap = self.heap.irqsave_lock();
         heap.reallocate(NonNull::new_unchecked(ptr), &new_layout)
     }
@@ -282,4 +324,9 @@ impl DynamicSlabHeap {
         let mut heap = self.heap.irqsave_lock();
         heap.check_memory_pressure();
     }
+}
+
+#[cfg(allocator = "slab_dynamic")]
+fn checked_align_up(value: usize, align: usize) -> Option<usize> {
+    value.checked_add(align - 1).map(|v| v & !(align - 1))
 }

@@ -377,3 +377,78 @@ fn dynamic_slab_heap_small_and_system_allocations() {
     }
     assert_eq!(heap.allocated(), 0);
 }
+
+#[cfg(allocator = "slab_dynamic")]
+#[test]
+fn dynamic_slab_heap_uses_and_reclaims_provider_pages() {
+    use allocator_crate::slab::{DynamicSlabHeap, SlabPage, SlabPageProvider};
+    use std::alloc::{alloc, dealloc};
+
+    const PAGE_COUNT: usize = 16;
+
+    struct TestProvider {
+        base: usize,
+        used: [bool; PAGE_COUNT],
+    }
+
+    unsafe impl SlabPageProvider for TestProvider {
+        fn acquire_page(&mut self) -> Option<SlabPage> {
+            let index = self.used.iter().position(|used| !used)?;
+            self.used[index] = true;
+            Some(SlabPage {
+                address: NonNull::new((self.base + index * 4096) as *mut u8).unwrap(),
+                index,
+            })
+        }
+
+        unsafe fn release_page(&mut self, page: SlabPage) {
+            assert!(self.used[page.index]);
+            assert_eq!(
+                page.address.as_ptr() as usize,
+                self.base + page.index * 4096
+            );
+            self.used[page.index] = false;
+        }
+    }
+
+    let mut pages = Arena([MaybeUninit::uninit(); PAGE_COUNT * 4096]);
+    let metadata_layout = DynamicSlabHeap::metadata_layout(PAGE_COUNT).unwrap();
+    let metadata = NonNull::new(unsafe { alloc(metadata_layout) }).unwrap();
+    let mut heap = DynamicSlabHeap::new();
+    unsafe {
+        heap.init_with_metadata(
+            metadata,
+            metadata_layout.size(),
+            pages.0.as_mut_ptr() as usize,
+            PAGE_COUNT,
+        )
+        .unwrap();
+    }
+    let mut provider = TestProvider {
+        base: pages.0.as_mut_ptr() as usize,
+        used: [false; PAGE_COUNT],
+    };
+
+    assert!(DynamicSlabHeap::supports_layout(&layout(2048, 2048)));
+    assert!(!DynamicSlabHeap::supports_layout(&layout(2049, 8)));
+    assert!(!DynamicSlabHeap::supports_layout(&layout(8, 4096)));
+
+    let object_layout = layout(63, 16);
+    let pointer = heap
+        .allocate_with_provider(&object_layout, &mut provider)
+        .expect("provider-backed allocation failed");
+    assert_eq!(heap.slab_allocation_size(pointer), Some(64));
+    assert_eq!(provider.used.iter().filter(|used| **used).count(), 1);
+
+    unsafe {
+        assert_eq!(
+            heap.deallocate_with_provider(pointer, &mut provider),
+            Some(64)
+        );
+    }
+    assert_eq!(provider.used.iter().filter(|used| **used).count(), 1);
+    assert_eq!(heap.reclaim_page_pool_to(&mut provider), 1);
+    assert!(provider.used.iter().all(|used| !used));
+
+    unsafe { dealloc(metadata.as_ptr(), metadata_layout) };
+}

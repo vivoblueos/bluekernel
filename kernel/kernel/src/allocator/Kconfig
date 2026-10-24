@@ -9,6 +9,7 @@ choice
         bool "SLAB algorithm (static)"
     config ALLOCATOR_SLAB_DYNAMIC
         bool "SLAB algorithm (dynamic, with page pool)"
+        select ALLOCATOR_BUDDY
     config ALLOCATOR_LLFF
         bool "LLFF algorithm"
 endchoice
@@ -34,13 +35,13 @@ config SLAB_DYNAMIC_MAX_TOTAL_PAGES
     depends on ALLOCATOR_SLAB_DYNAMIC
 
 config ALLOCATOR_BUDDY
-    bool "Enable buddy allocator as physical page manager"
+    bool "Enable buddy allocator as dynamic slab backend (or standalone unit tests)"
     default n
     help
-        Enable the buddy allocator to manage all physical memory pages.
-        This can coexist with TLSF/SLAB/LLFF, which remain the selected
-        heap allocator for small allocations.
-        When enabled, slab allocator operates on top of buddy-allocated
-        page pools; >= PAGE_SIZE allocations go directly to buddy;
-        tlsf/llff keep their original __heap_start~__heap_end path.
-        When disabled, the kernel falls back to direct heap management.
+        This option is selected automatically by dynamic slab. It may also be
+        enabled independently in test builds to include the standalone buddy
+        allocator unit tests.
+
+        Dynamic slab obtains its pages from buddy and forwards requests larger
+        than 2048 bytes to buddy. Other heap implementations do not forward
+        GlobalAlloc requests to the buddy allocator.

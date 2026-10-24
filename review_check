@@ -1,0 +1,7 @@
+kernel/allocator/src/buddy.rs
+kernel/allocator/src/slab.rs
+kernel/allocator/tests/miri.rs
+kernel/kernel/src/allocator/Kconfig		----- reviewed
+kernel/kernel/src/allocator/buddy/tests.rs
+kernel/kernel/src/allocator/mod.rs
+kernel/kernel/src/allocator/slab/heap.rs

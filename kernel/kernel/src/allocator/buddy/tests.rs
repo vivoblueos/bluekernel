@@ -224,6 +224,17 @@ fn raw_uninitialized_memory_info_is_empty() {
     );
 }
 
+/// Verifies that higher allocator layers can recover only live block heads.
+#[test]
+fn raw_allocation_order_reports_live_block_heads() {
+    let mut fixture = RawBuddyFixture::new();
+    let frame = fixture.buddy.alloc_pages(3).unwrap();
+    assert_eq!(fixture.buddy.allocation_order(frame.pfn()), Some(3));
+    assert_eq!(fixture.buddy.allocation_order(frame.pfn() + 1), None);
+    unsafe { fixture.buddy.free_pages(frame, 3) };
+    assert_eq!(fixture.buddy.allocation_order(frame.pfn()), None);
+}
+
 /// Verifies page accounting when only an arbitrary subrange is manageable.
 #[test]
 fn raw_init_accounts_for_arbitrary_manageable_range() {
