@@ -239,6 +239,17 @@ fn switch_current_thread(next: ThreadNode, old_sp: usize) -> usize {
         GlobalQueueVisitor::remove(&mut old);
         if let Some(process) = old.process() {
             process.remove_thread(&mut old);
+            // When the last thread of a process exits, reclaim the process.
+            // This auto-reaps the boot-app model (an app process whose only
+            // thread spawned the test threads and then retired) as well as
+            // an externally `destroy_process`-requested Zombie whose final
+            // thread just exited. Routing through `destroy_process` keeps the
+            // SMP race closed: it commits `become_zombie` *before* re-checking
+            // `has_no_threads`, and `finalize_destroy`'s `table.remove` claim
+            // serializes a racing duplicate.
+            if process.has_no_threads() {
+                crate::process::ProcessManager::get().destroy_process(process.pid());
+            }
         }
         if ThreadNode::strong_count(&old) != 1 {
             // TODO: Add warning log that there are still references to the old thread.
