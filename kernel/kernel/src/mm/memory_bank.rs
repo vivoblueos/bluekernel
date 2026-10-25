@@ -20,11 +20,15 @@
 //! subsystem can enumerate usable physical memory without knowing how a
 //! particular board reports it.
 
-use crate::mm::PhysicalAddress;
+use crate::mm::{PhysicalAddress, VirtualAddress};
 
 pub struct MemoryBank {
     /// The start of the memory bank, inclusive.
     pub start: PhysicalAddress,
     /// The end of the memory bank, exclusive.
     pub end: PhysicalAddress,
+}
+
+pub struct MemoryRegion {
+    pub base: VirtualAddress,
 }

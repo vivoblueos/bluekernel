@@ -73,4 +73,11 @@ SECTIONS
     . += 0x2000000;
     __heap_end = .;
     _end = .;
+
+    .boot_page_table (NOLOAD) : ALIGN(4096)
+    {
+        /* Reclaimed after switching from the identity map to the linear map. */
+        BOOT_PAGE_TABLE = LOADADDR(.boot_page_table);
+        . += 4096;
+    }
 }

@@ -12,30 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub struct PageLevel {
-    pub index_shift: u8,
-    pub index_bits: u8,
-    pub table_bytes: usize,
-    pub table_align: usize,
-    pub leaf_allowed: bool,
+use crate::mm::VirtualAddress;
+
+pub trait PageLevel {
+    const INDEX_SHIFT: u8;
+    const INDEX_BITS: u8;
+    const TABLE_BYTES: usize;
+    const TABLE_ALIGN: usize;
+    const LEAF_ALLOWED: bool;
 }
 
-pub struct PageFormat {
-    pub va_bits: u8,
-    pub max_pa_bits: u8,
-    pub levels: &'static [PageLevel],
+pub fn page_index<L: PageLevel>(va: VirtualAddress) -> usize {
+    let mask = (1usize << L::INDEX_BITS) - 1;
+    ((va.0 >> L::INDEX_SHIFT) & mask) as usize
 }
 
-impl PageFormat {
-    const fn level_count(&self) -> usize {
-        self.levels.len()
-    }
+// #[derive(Copy, Clone)]
+// pub struct PageFormat<const LEVEL_COUNT: usize> {
+//     pub va_bits: u8,
+//     pub max_pa_bits: u8,
+//     pub levels: [PageLevel; LEVEL_COUNT],
+// }
+
+// impl<const LEVEL_COUNT: usize> PageFormat<LEVEL_COUNT> {
+//     const fn level_count(&self) -> usize {
+//         self.levels.len()
+//     }
 
     // Safty: the validation of the va and pa is not checked here, 
     //        it should be checked before calling this function.
-    pub fn index(&self, va: u64, level: usize) -> usize {
-        let spec = &self.levels[level];
-        let mask = (1u64 << spec.index_bits) - 1;
-        ((va >> spec.index_shift) & mask) as usize
-    }
-}
+//     #[inline(always)]
+//     pub fn index(&self, va: u64, level: usize) -> usize {
+//         let spec = &self.levels[level];
+//         let mask = (1u64 << spec.index_bits) - 1;
+//         ((va >> spec.index_shift) & mask) as usize
+//     }
+// }

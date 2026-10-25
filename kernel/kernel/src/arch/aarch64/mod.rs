@@ -20,7 +20,7 @@ pub(crate) mod psci;
 pub(crate) mod vector;
 pub(crate) mod virt;
 #[cfg(paging)]
-pub(super) mod page_format;
+pub(crate) mod page;
 
 use crate::{mm::VirtualAddress, scheduler};
 use aarch64_cpu::{

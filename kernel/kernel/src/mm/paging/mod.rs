@@ -21,4 +21,29 @@ enum PteType {
     Invalid,
 }
 
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct PageEntry(usize);
 
+pub unsafe extern "C" fn init_boot_pgtable() {
+    unsafe extern "C" {
+        static mut BOOT_PAGE_TABLE: u8;
+    }
+
+    let entries_ptr = core::ptr::addr_of_mut!(BOOT_PAGE_TABLE).cast::<PageEntry>();
+
+    unsafe {
+        core::ptr::write_bytes(entries_ptr, 0, 512);
+        let entries =
+            core::slice::from_raw_parts_mut(entries_ptr, 512);
+
+        for &base in crate::boards::MMU_L1_DEVICE_BASES {
+            let index = (base >> 30) as usize;
+            
+        }
+
+        for &base in crate::boards::MMU_L1_NORMAL_BASES {
+            let index = (base >> 30) as usize;
+        }
+    }
+}
