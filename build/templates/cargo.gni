@@ -79,13 +79,13 @@ template("cargo_spec") {
   }
 
   _label = get_label_info(":" + target_name, "label_no_toolchain")
-  _prepared = gnrt_mode == "collect"
+  _needs_sync = gnrt_mode != "collect"
   foreach(_entry, gnrt_crate_index.crates) {
     if (_entry.proxy == _label) {
-      _prepared = true
+      _needs_sync = false
     }
   }
-  if (!_prepared) {
+  if (_needs_sync) {
     action("${target_name}_gnrt_missing") {
       script = "//build/scripts/check_gnrt_sync.py"
       args = [
@@ -97,7 +97,7 @@ template("cargo_spec") {
   }
 
   group(target_name) {
-    if (!_prepared) {
+    if (_needs_sync) {
       deps = [ ":${target_name}_gnrt_missing" ]
     }
     metadata = {
