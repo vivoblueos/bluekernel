@@ -26,11 +26,11 @@ const MAIR_WRITE_THROUGH_INDEX: usize = 3;
 register_bitfields! {usize,
     pub PAGE_FORMAT [
         /// Level 1 table index, VA[38:30].
-        INDEX1 OFFSET(30) NUMBITS(9) [],
+        INDEX0 OFFSET(30) NUMBITS(9) [],
         /// Level 2 table index, VA[29:21].
-        INDEX2 OFFSET(21) NUMBITS(9) [],
+        INDEX1 OFFSET(21) NUMBITS(9) [],
         /// Level 3 table index, VA[20:12].
-        INDEX3 OFFSET(12) NUMBITS(9) [],
+        INDEX2 OFFSET(12) NUMBITS(9) [],
         /// Offset within a 4 KiB page, VA[11:0].
         PAGE_OFFSET OFFSET(0) NUMBITS(12) [],
     ],
@@ -156,5 +156,14 @@ impl PageFormat for PageEntry {
             value |= LEAF_PAGE::TYPE::Page.value;
         }
         value
+    }
+    fn get_index(base: usize, level: u8) -> usize {
+        match level {
+            0 => PAGE_FORMAT::INDEX0.read(base),
+            1 => PAGE_FORMAT::INDEX1.read(base),
+            2 => PAGE_FORMAT::INDEX2.read(base),
+            // TODO: Should be complained at compile time instead of runtime
+            _ => panic!("Invalid page table level"),
+        }
     }
 }

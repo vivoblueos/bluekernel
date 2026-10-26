@@ -12,22 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod page_format;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
     arch::page::PAGE_FORMAT,
     mm::{CachePolicy, MemAttribute, MemFlags, MemType},
 };
-pub use page_format::*;
 
 static PAGETABLE_INIT_DONE: AtomicBool = AtomicBool::new(false);
-
-enum PteType {
-    Page,
-    PageDirectory,
-    Invalid,
-}
 
 #[derive(Copy, Clone)]
 #[repr(transparent)]
@@ -60,8 +52,7 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
                 let entries = core::slice::from_raw_parts_mut(entries_ptr, 512);
 
                 for &base in crate::boards::MMU_L1_DEVICE_BASES {
-                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
-                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
+                    let index = P::get_index(base as usize, 0);
                     let v = P::get_translate(
                         base as usize,
                         MemAttribute {
@@ -74,8 +65,7 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
                 }
 
                 for &base in crate::boards::MMU_L1_NORMAL_BASES {
-                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
-                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
+                    let index = P::get_index(base as usize, 0);
                     let v = P::get_translate(
                         base as usize,
                         MemAttribute {
@@ -99,4 +89,6 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
 
 pub trait PageFormat {
     fn get_translate(base: usize, att: MemAttribute, is_block: bool) -> usize;
+    #[inline(always)]
+    fn get_index(base: usize, level: u8) -> usize;
 }
