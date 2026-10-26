@@ -17,18 +17,24 @@ use crate::mm::paging::PageLevel;
 pub struct Level0;
 pub struct Level1;
 pub struct Level2;
+pub struct Level3;
 
 impl PageLevel for Level0 {
-    const INDEX_SHIFT: u8 = 48;
-    const INDEX_BITS: u8 = 9;
-}
-
-impl PageLevel for Level1 {
     const INDEX_SHIFT: u8 = 39;
     const INDEX_BITS: u8 = 9;
 }
 
-impl PageLevel for Level2 {
+impl PageLevel for Level1 {
     const INDEX_SHIFT: u8 = 30;
+    const INDEX_BITS: u8 = 9;
+}
+
+impl PageLevel for Level2 {
+    const INDEX_SHIFT: u8 = 21;
+    const INDEX_BITS: u8 = 9;
+}
+
+impl PageLevel for Level3 {
+    const INDEX_SHIFT: u8 = 12;
     const INDEX_BITS: u8 = 9;
 }

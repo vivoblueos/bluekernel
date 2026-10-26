@@ -16,7 +16,7 @@ pub mod page_format;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
-    arch::page::{set_descriptor, DescriptorKind, Level0},
+    arch::page::PAGE_FORMAT,
     mm::{CachePolicy, MemAttribute, MemFlags, MemType},
 };
 pub use page_format::*;
@@ -34,7 +34,7 @@ enum PteType {
 pub struct PageEntry(usize);
 
 // Safty: Only be used before the MMU is enabled
-pub unsafe extern "C" fn init_boot_pgtable() -> usize {
+pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
     let cpu_id = crate::arch::current_cpu_id();
 
     unsafe extern "C" {
@@ -60,30 +60,30 @@ pub unsafe extern "C" fn init_boot_pgtable() -> usize {
                 let entries = core::slice::from_raw_parts_mut(entries_ptr, 512);
 
                 for &base in crate::boards::MMU_L1_DEVICE_BASES {
-                    let index = page_index::<Level0>(base as usize);
-                    let v = set_descriptor(
-                        base,
+                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
+                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
+                    let v = P::get_translate(
+                        base as usize,
                         MemAttribute {
                             flags: MemFlags::READ | MemFlags::WRITE | MemFlags::GLOBAL,
                             memory_type: MemType::Device,
                         },
-                        DescriptorKind::Block,
-                    )
-                    .expect("valid boot device memory attributes");
+                        true,
+                    );
                     entries[index] = PageEntry(v);
                 }
 
                 for &base in crate::boards::MMU_L1_NORMAL_BASES {
-                    let index = page_index::<Level0>(base as usize);
-                    let v = set_descriptor(
-                        base,
+                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
+                    let index = PAGE_FORMAT::INDEX1.read(base as usize);
+                    let v = P::get_translate(
+                        base as usize,
                         MemAttribute {
                             flags: MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE,
                             memory_type: MemType::Normal(CachePolicy::WriteBack),
                         },
-                        DescriptorKind::Block,
-                    )
-                    .expect("valid boot normal memory attributes");
+                        true,
+                    );
                     entries[index] = PageEntry(v);
                 }
             }
@@ -95,4 +95,8 @@ pub unsafe extern "C" fn init_boot_pgtable() -> usize {
         }
     }
     phys_addr
+}
+
+pub trait PageFormat {
+    fn get_translate(base: usize, att: MemAttribute, is_block: bool) -> usize;
 }

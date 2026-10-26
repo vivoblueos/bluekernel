@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub trait PageLevel {
-    const INDEX_SHIFT: u8;
-    const INDEX_BITS: u8;
-}
+// pub trait PageLevel {
+//     const INDEX_SHIFT: u8;
+//     const INDEX_BITS: u8;
+// }
 
-pub fn page_index<L: PageLevel>(va: usize) -> usize {
-    let mask = (1usize << L::INDEX_BITS) - 1;
-    ((va >> L::INDEX_SHIFT) & mask) as usize
-}
+// pub fn page_index<L: PageLevel>(va: usize) -> usize {
+//     let mask = (1usize << L::INDEX_BITS) - 1;
+//     ((va >> L::INDEX_SHIFT) & mask) as usize
+// }
 
 // #[derive(Copy, Clone)]
 // pub struct PageFormat<const LEVEL_COUNT: usize> {

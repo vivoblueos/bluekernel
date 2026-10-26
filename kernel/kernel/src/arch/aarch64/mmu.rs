@@ -403,7 +403,7 @@ pub unsafe fn free_page_table(pgtbl: *mut PageTableManager) {
 }
 
 pub fn init_el1_enable_mmu() {
-    let phys_addr = unsafe { crate::mm::paging::init_boot_pgtable() };
+    let phys_addr = unsafe { crate::mm::paging::init_boot_pgtable::<super::page::PageEntry>() };
     dsb(SY);
     TTBR0_EL1.set(phys_addr as u64);
     TTBR1_EL1.set(phys_addr as u64);
