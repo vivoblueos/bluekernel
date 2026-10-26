@@ -41,16 +41,13 @@
 // ============================================================================
 
 use crate::{
-    arch::aarch64::asm, mm::{PhysicalAddress, VirtualAddress, paging::PageFormat},
+    arch::aarch64::asm, mm::{PhysicalAddress, VirtualAddress},
 };
 use aarch64_cpu::{
     asm::{
-        barrier::{dsb, isb, SY},
-        sev, wfe,
-    },
-    registers::{MAIR_EL1, SCTLR_EL1, TCR_EL1, TTBR1_EL1},
+        barrier::{SY, dsb, isb}, sev, wfe,
+    }, registers::{MAIR_EL1, SCTLR_EL1, TCR_EL1, TTBR0_EL1, TTBR1_EL1},
 };
-use blueos_infra::no_let_underscore::IgnoreResult;
 use core::{
     mem, ptr,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -70,11 +67,6 @@ const TCR_TSZ: u64 = u64::BITS as u64 - KERNEL_VA_BITS;
 pub(crate) const KERNEL_VIRT_START: u64 = crate::mm::KERNEL_VIRT_OFFSET as u64;
 
 pub use crate::mm::{kernel_phys_to_virt, kernel_virt_to_phys};
-
-// End of the kernel-reserved virtual address range, including the heap.
-unsafe extern "C" {
-    static mut _end: u8;
-}
 
 #[repr(u64)]
 #[derive(Debug, Clone, Copy)]
@@ -165,27 +157,11 @@ register_bitfields! {u64,
 #[repr(transparent)]
 pub struct PageEntry(u64);
 
-#[derive(Copy, Clone)]
-enum DescriptorKind {
-    Block,
-    Page,
-}
-
 impl PageEntry {
-    // Create a new invalid entry
-    const fn new() -> Self {
-        Self(0)
-    }
-
-    pub const fn from_u64(value: u64) -> Self {
-        Self(value)
-    }
-
-    fn set_descriptor(
+    fn set_page(
         &mut self,
         output_addr: u64,
         attributes: MemAttributes,
-        descriptor_kind: DescriptorKind,
     ) -> Result<(), &'static str> {
         if self.is_valid() {
             return Err("page entry is set");
@@ -207,35 +183,10 @@ impl PageEntry {
             ),
         }
 
-        let mut value = entry.get();
-        match descriptor_kind {
-            DescriptorKind::Block => {
-                value |= output_addr;
-            }
-            DescriptorKind::Page => {
-                value |= PAGE_DESCRIPTOR::TYPE::Page.value;
-                value |= output_addr & PAGE_DESCRIPTOR_ADDR_MASK;
-            }
-        }
-
-        self.0 = value;
+        self.0 = entry.get()
+            | PAGE_DESCRIPTOR::TYPE::Page.value
+            | (output_addr & PAGE_DESCRIPTOR_ADDR_MASK);
         Ok(())
-    }
-
-    fn set_block(
-        &mut self,
-        output_addr: u64,
-        attributes: MemAttributes,
-    ) -> Result<(), &'static str> {
-        self.set_descriptor(output_addr, attributes, DescriptorKind::Block)
-    }
-
-    fn set_page(
-        &mut self,
-        output_addr: u64,
-        attributes: MemAttributes,
-    ) -> Result<(), &'static str> {
-        self.set_descriptor(output_addr, attributes, DescriptorKind::Page)
     }
 
     fn set_table(&mut self, table: *mut PageTableManager) -> Result<(), &'static str> {
@@ -272,62 +223,9 @@ impl PageEntry {
     }
 }
 
-// This page table must be available before `init_runtime()` clears `.bss`,
-// because we may set up EL1 MMU state while still running in EL2.
-#[used]
-#[cfg_attr(compatible_old_toolchain, link_section = ".data")]
-#[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
-static mut TABLE_MANAGER: PageTableManager = PageTableManager::new();
-
-#[used]
-#[cfg_attr(compatible_old_toolchain, link_section = ".data")]
-#[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
-static mut LINEARMAP_MANAGER: PageTableManager = PageTableManager::new();
-
 #[repr(C, align(4096))]
 pub struct PageTableManager([PageEntry; 512]);
 
-impl PageTableManager {
-    const fn new() -> Self {
-        PageTableManager([PageEntry::new(); 512])
-    }
-
-    fn init() {
-        let table = unsafe { &mut TABLE_MANAGER };
-        for &base in crate::boards::MMU_L1_DEVICE_BASES {
-            let index = (base >> 30) as usize;
-            table.0[index]
-                .set_block(base, MemAttributes::Device)
-                .ignore_result();
-        }
-        for &base in crate::boards::MMU_L1_NORMAL_BASES {
-            let index = (base >> 30) as usize;
-            table.0[index]
-                .set_block(base, MemAttributes::Normal)
-                .ignore_result();
-        }
-    }
-
-    fn init_linearmap() {
-        let table = unsafe { &mut LINEARMAP_MANAGER };
-        for &base in crate::boards::MMU_L1_DEVICE_BASES {
-            let index = (base >> 30) as usize;
-            table.0[index]
-                .set_block(base, MemAttributes::Device)
-                .ignore_result();
-        }
-        for &base in crate::boards::MMU_L1_NORMAL_BASES {
-            let index = (base >> 30) as usize;
-            table.0[index]
-                .set_block(base, MemAttributes::Normal)
-                .ignore_result();
-        }
-    }
-}
-
-// Indicate whether the page table initialization is done.
-static PAGETABLE_INIT_DONE: AtomicBool = AtomicBool::new(false);
-static LINEARMAP_INIT_DONE: AtomicBool = AtomicBool::new(false);
 static RUNTIME_LINEARMAP_INIT_DONE: AtomicBool = AtomicBool::new(false);
 static RUNTIME_LINEARMAP_PHYS: AtomicUsize = AtomicUsize::new(0);
 
@@ -505,34 +403,20 @@ pub unsafe fn free_page_table(pgtbl: *mut PageTableManager) {
 }
 
 pub fn init_el1_enable_mmu() {
-    // Only allow CPU0 to initialize the page table, other cores wait
-    let cpu_id = crate::arch::current_cpu_id();
-    if cpu_id == 0 {
-        PageTableManager::init();
-        PAGETABLE_INIT_DONE.store(true, Ordering::Release);
-        // Wake up all cores waiting on wfe
-        sev();
-    } else {
-        // Wait for CPU0 to finish page table initialization.
-        while !PAGETABLE_INIT_DONE.load(Ordering::Acquire) {
-            wfe();
-        }
-    }
-    // Set physical table base addr.
-    unsafe {
-        core::arch::asm!(
-            "adrp {temp}, {tbl}",
-            "msr ttbr0_el1, {temp}",
-            temp = out(reg) _,
-            tbl = sym TABLE_MANAGER,
-            options(nostack, nomem)
-        )
-    };
-    // Set memory type.
+    let phys_addr = unsafe { crate::mm::paging::init_boot_pgtable() };
+    dsb(SY);
+    TTBR0_EL1.set(phys_addr as u64);
+    TTBR1_EL1.set(phys_addr as u64);
+
+    // Keep slots 0..3 in sync with the attribute indices in arch::page.
     MAIR_EL1.write(
         MAIR_EL1::Attr1_Normal_Outer::WriteBack_NonTransient_ReadWriteAlloc
             + MAIR_EL1::Attr1_Normal_Inner::WriteBack_NonTransient_ReadWriteAlloc
-            + MAIR_EL1::Attr0_Device::nonGathering_nonReordering_EarlyWriteAck,
+            + MAIR_EL1::Attr0_Device::nonGathering_nonReordering_EarlyWriteAck
+            + MAIR_EL1::Attr2_Normal_Outer::NonCacheable
+            + MAIR_EL1::Attr2_Normal_Inner::NonCacheable
+            + MAIR_EL1::Attr3_Normal_Outer::WriteThrough_NonTransient_ReadWriteAlloc
+            + MAIR_EL1::Attr3_Normal_Inner::WriteThrough_NonTransient_ReadWriteAlloc,
     );
     // Configure address translation related control information.
     TCR_EL1.write(
@@ -542,10 +426,16 @@ pub fn init_el1_enable_mmu() {
             + TCR_EL1::SH0::Inner
             + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
             + TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-            + TCR_EL1::EPD1::DisableTTBR1Walks
             + TCR_EL1::EPD0::EnableTTBR0Walks
-            + TCR_EL1::T0SZ.val(TCR_TSZ),
+            + TCR_EL1::T0SZ.val(TCR_TSZ)
+            + TCR_EL1::TG1::KiB_4
+            + TCR_EL1::SH1::Inner
+            + TCR_EL1::ORGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+            + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+            + TCR_EL1::EPD1::EnableTTBR1Walks
+            + TCR_EL1::T1SZ.val(TCR_TSZ),
     );
+
     // Clear tlb.
     flush_tlb_all();
     // Enable the MMU.
@@ -556,34 +446,6 @@ pub fn init_el1_enable_mmu() {
             + SCTLR_EL1::SA::Enable,
     );
     isb(SY);
-}
-
-pub fn init_el1_boot_linearmap() {
-    let cpu_id = crate::arch::current_cpu_id();
-    if cpu_id == 0 {
-        PageTableManager::init_linearmap();
-        LINEARMAP_INIT_DONE.store(true, Ordering::Release);
-        // Wake up all cores waiting on wfe
-        sev();
-    } else {
-        // Wait for CPU0 to finish linearmap table initialization.
-        while !LINEARMAP_INIT_DONE.load(Ordering::Acquire) {
-            wfe();
-        }
-    }
-
-    TTBR1_EL1.set(core::ptr::addr_of!(LINEARMAP_MANAGER) as u64);
-
-    TCR_EL1.modify(
-        TCR_EL1::TG1::KiB_4
-            + TCR_EL1::SH1::Inner
-            + TCR_EL1::ORGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-            + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-            + TCR_EL1::EPD1::EnableTTBR1Walks
-            + TCR_EL1::T1SZ.val(TCR_TSZ),
-    );
-
-    flush_tlb_all();
 }
 
 pub fn init_el1_runtime_linearmap() -> Result<(), &'static str> {

@@ -81,7 +81,6 @@ macro_rules! enter_el1 {
         add x4, x4, #0x1000
         mov sp, x4
         bl {init_el1_enable_mmu}
-        bl {init_el1_boot_linearmap}
         mov sp, x19
         // Set EL1 entry and enter.
         ldr x12, ={kernel_virt_start}
@@ -130,7 +129,6 @@ macro_rules! arch_bootstrap {
             entry = sym $crate::arch::aarch64::jump_to_high_va,
             virt_init = sym $crate::arch::aarch64::virt::virt_init,
             init_el1_enable_mmu = sym $crate::arch::aarch64::mmu::init_el1_enable_mmu,
-            init_el1_boot_linearmap = sym $crate::arch::aarch64::mmu::init_el1_boot_linearmap,
             kernel_virt_start = const $crate::arch::aarch64::mmu::KERNEL_VIRT_START,
             tmp_stack = sym $crate::arch::aarch64::TEMP_BOOT_STACK,
             stack_start = sym $stack_start,

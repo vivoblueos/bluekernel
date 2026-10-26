@@ -72,12 +72,12 @@ SECTIONS
     __heap_start = .;
     . += 0x2000000;
     __heap_end = .;
-    _end = .;
 
     .boot_page_table (NOLOAD) : ALIGN(4096)
     {
-        /* Reclaimed after switching from the identity map to the linear map. */
+        /* Keep the shared boot table reserved during heap initialization. */
         BOOT_PAGE_TABLE = LOADADDR(.boot_page_table);
         . += 4096;
     }
+    _end = .;
 }

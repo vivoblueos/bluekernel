@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod mem_attribute;
+pub use mem_attribute::{CachePolicy, MemAttribute, MemFlags, MemType};
+
 #[cfg(paging)]
 pub mod paging;
 pub mod memory_bank;

@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mm::VirtualAddress;
-
 pub trait PageLevel {
     const INDEX_SHIFT: u8;
     const INDEX_BITS: u8;
-    const TABLE_BYTES: usize;
-    const TABLE_ALIGN: usize;
-    const LEAF_ALLOWED: bool;
 }
 
-pub fn page_index<L: PageLevel>(va: VirtualAddress) -> usize {
+pub fn page_index<L: PageLevel>(va: usize) -> usize {
     let mask = (1usize << L::INDEX_BITS) - 1;
-    ((va.0 >> L::INDEX_SHIFT) & mask) as usize
+    ((va >> L::INDEX_SHIFT) & mask) as usize
 }
 
 // #[derive(Copy, Clone)]

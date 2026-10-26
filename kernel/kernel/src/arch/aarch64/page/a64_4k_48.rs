@@ -11,3 +11,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use crate::mm::paging::PageLevel;
+
+pub struct Level0;
+pub struct Level1;
+pub struct Level2;
+
+impl PageLevel for Level0 {
+    const INDEX_SHIFT: u8 = 48;
+    const INDEX_BITS: u8 = 9;
+}
+
+impl PageLevel for Level1 {
+    const INDEX_SHIFT: u8 = 39;
+    const INDEX_BITS: u8 = 9;
+}
+
+impl PageLevel for Level2 {
+    const INDEX_SHIFT: u8 = 30;
+    const INDEX_BITS: u8 = 9;
+}

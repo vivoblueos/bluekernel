@@ -13,7 +13,15 @@
 // limitations under the License.
 
 pub mod page_format;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::{
+    arch::page::{set_descriptor, DescriptorKind, Level0},
+    mm::{CachePolicy, MemAttribute, MemFlags, MemType},
+};
 pub use page_format::*;
+
+static PAGETABLE_INIT_DONE: AtomicBool = AtomicBool::new(false);
 
 enum PteType {
     Page,
@@ -25,25 +33,66 @@ enum PteType {
 #[repr(transparent)]
 pub struct PageEntry(usize);
 
-pub unsafe extern "C" fn init_boot_pgtable() {
+// Safty: Only be used before the MMU is enabled
+pub unsafe extern "C" fn init_boot_pgtable() -> usize {
+    let cpu_id = crate::arch::current_cpu_id();
+
     unsafe extern "C" {
         static mut BOOT_PAGE_TABLE: u8;
     }
 
-    let entries_ptr = core::ptr::addr_of_mut!(BOOT_PAGE_TABLE).cast::<PageEntry>();
-
+    let phys_addr: usize;
     unsafe {
-        core::ptr::write_bytes(entries_ptr, 0, 512);
-        let entries =
-            core::slice::from_raw_parts_mut(entries_ptr, 512);
+        // Load the absolute physical address defined by the linker script.
+        core::arch::asm!(
+            "ldr {addr}, ={table}",
+            addr = out(reg) phys_addr,
+            table = sym BOOT_PAGE_TABLE,
+            options(readonly, nostack, preserves_flags),
+        );
+    }
 
-        for &base in crate::boards::MMU_L1_DEVICE_BASES {
-            let index = (base >> 30) as usize;
-            
+    if cpu_id == 0 {
+        if crate::arch::current_cpu_id() == 0 {
+            let entries_ptr = phys_addr as *mut PageEntry;
+            unsafe {
+                core::ptr::write_bytes(entries_ptr, 0, 512);
+                let entries = core::slice::from_raw_parts_mut(entries_ptr, 512);
+
+                for &base in crate::boards::MMU_L1_DEVICE_BASES {
+                    let index = page_index::<Level0>(base as usize);
+                    let v = set_descriptor(
+                        base,
+                        MemAttribute {
+                            flags: MemFlags::READ | MemFlags::WRITE | MemFlags::GLOBAL,
+                            memory_type: MemType::Device,
+                        },
+                        DescriptorKind::Block,
+                    )
+                    .expect("valid boot device memory attributes");
+                    entries[index] = PageEntry(v);
+                }
+
+                for &base in crate::boards::MMU_L1_NORMAL_BASES {
+                    let index = page_index::<Level0>(base as usize);
+                    let v = set_descriptor(
+                        base,
+                        MemAttribute {
+                            flags: MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE,
+                            memory_type: MemType::Normal(CachePolicy::WriteBack),
+                        },
+                        DescriptorKind::Block,
+                    )
+                    .expect("valid boot normal memory attributes");
+                    entries[index] = PageEntry(v);
+                }
+            }
         }
-
-        for &base in crate::boards::MMU_L1_NORMAL_BASES {
-            let index = (base >> 30) as usize;
+        PAGETABLE_INIT_DONE.store(true, Ordering::Release);
+    } else {
+        while !PAGETABLE_INIT_DONE.load(Ordering::Acquire) {
+            core::hint::spin_loop();
         }
     }
+    phys_addr
 }
