@@ -42,6 +42,7 @@
 
 use crate::{
     arch::aarch64::asm, mm::{PhysicalAddress, VirtualAddress},
+    support::{align_down_size, align_up_size},
 };
 use aarch64_cpu::{
     asm::{
@@ -239,16 +240,6 @@ fn flush_tlb_all() {
 #[inline]
 const fn page_table_index(addr: usize, shift: usize) -> usize {
     (addr >> shift) & PAGE_TABLE_INDEX_MASK
-}
-
-#[inline]
-const fn align_down(addr: usize, align: usize) -> usize {
-    addr & !(align - 1)
-}
-
-#[inline]
-const fn align_up(addr: usize, align: usize) -> usize {
-    (addr + align - 1) & !(align - 1)
 }
 
 #[inline]
@@ -454,7 +445,7 @@ pub fn init_el1_runtime_linearmap() -> Result<(), &'static str> {
         let runtime_linearmap = alloc_page_table()?;
         let runtime_linearmap_table = unsafe { &mut *runtime_linearmap };
         for &base in crate::boards::MMU_L1_DEVICE_BASES {
-            let aligned_base = align_down(base as usize, L1_BLOCK_SIZE as usize);
+            let aligned_base = align_down_size(base as usize, L1_BLOCK_SIZE as usize);
             map_range_in_pgtbl(
                 runtime_linearmap_table,
                 kernel_phys_to_virt(PhysicalAddress::new(aligned_base)).into_raw(),
@@ -464,7 +455,7 @@ pub fn init_el1_runtime_linearmap() -> Result<(), &'static str> {
             )?;
         }
         for &base in crate::boards::MMU_L1_NORMAL_BASES {
-            let aligned_base = align_down(base as usize, L1_BLOCK_SIZE as usize);
+            let aligned_base = align_down_size(base as usize, L1_BLOCK_SIZE as usize);
 
             // Map the intersection between this L1 block and the physical DRAM range.
             let dram_base = crate::boards::PHYS_DRAM_BASE as usize;
@@ -480,8 +471,8 @@ pub fn init_el1_runtime_linearmap() -> Result<(), &'static str> {
             let map_end = core::cmp::min(block_end, dram_end);
 
             if map_start < map_end {
-                let map_start_aligned = align_down(map_start, PAGE_SIZE);
-                let map_end_aligned = align_up(map_end, PAGE_SIZE);
+                let map_start_aligned = align_down_size(map_start, PAGE_SIZE);
+                let map_end_aligned = align_up_size(map_end, PAGE_SIZE);
                 let map_len = map_end_aligned.saturating_sub(map_start_aligned);
 
                 map_range_in_pgtbl(
