@@ -38,7 +38,10 @@ const NUM_CORES: usize = blueos_kconfig::CONFIG_NUM_CORES as usize;
 pub(crate) fn init() {
     STAGING.run(0, true, crate::boot::init_runtime);
     STAGING.run(1, true, crate::boot::init_heap);
-    STAGING.run(2, false, arch::vector::init);
+    STAGING.run(2, false, || {
+        arch::vector::init();
+        crate::mm::kernel_space::init().expect("failed to initialize kernel address space");
+    });
     STAGING.run(3, true, || unsafe {
         arch::irq::init(config::GICD as u64, config::GICR as u64, NUM_CORES, false)
     });

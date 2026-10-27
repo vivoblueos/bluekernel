@@ -32,7 +32,10 @@ use crate::{
 use alloc::string::String;
 use blueos_driver::uart::UartConfig;
 use blueos_hal::{Configuration, PlatPeri};
-use core::ptr::{addr_of, addr_of_mut};
+use core::{
+    ptr::{addr_of, addr_of_mut},
+    sync::atomic::{AtomicBool, Ordering},
+};
 use spin::Once;
 
 // We have to put these globals in the .data section. If not specified explicitly,
@@ -45,7 +48,7 @@ pub(crate) static mut INIT_BSS_DONE: bool = false;
 pub(crate) static mut INIT_ARRAY_DONE: bool = false;
 #[cfg_attr(compatible_old_toolchain, link_section = ".data")]
 #[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
-pub(crate) static mut INIT_HEAP_DONE: bool = false;
+pub(crate) static INIT_HEAP_DONE: AtomicBool = AtomicBool::new(false);
 #[cfg_attr(compatible_old_toolchain, link_section = ".data")]
 #[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
 pub(crate) static mut INIT_VFS_DONE: bool = false;
@@ -72,6 +75,7 @@ unsafe extern "C" {
     pub static mut __sys_stack_start: u8;
     pub static mut __sys_stack_end: u8;
     pub static mut __heap_start: u8;
+    #[cfg(not(paging))]
     pub static mut __heap_end: u8;
     pub static mut _end: u8;
 }
@@ -92,12 +96,6 @@ extern "C" fn init() {
     init_heap();
     init_runtime();
     init_pin_states(crate::boards::PIN_STATES);
-
-    // FIXME: 4KB paging can only be used after heap initialization is complete.
-    // This call is used to verify that 4KB paging works correctly; perhaps it can be removed later?
-    #[cfg(target_arch = "aarch64")]
-    crate::arch::aarch64::mmu::init_el1_runtime_linearmap()
-        .expect("failed to initialize AArch64 EL1 runtime 4KB linearmap");
 
     let uart = crate::boards::get_device!(console_uart);
     uart.configure(&UartConfig::default()).unwrap();
@@ -230,12 +228,59 @@ fn init_apps() {
 }
 
 #[inline(never)]
-pub(crate) fn init_heap() {
+#[cfg(all(paging, not(allocator_buddy)))]
+fn init_frames() {
+    use crate::mm::{
+        kernel_virt_to_phys,
+        paging::{
+            first_fit::{FirstFitFrameAllocator, FrameState},
+            PageFormat,
+        },
+        PhysicalAddress, VirtualAddress,
+    };
+
+    const PAGE_SIZE: usize = <crate::arch::page::PageEntry as PageFormat>::PAGE_SIZE;
+    const PHYS_BASE: usize = crate::boards::PHYS_DRAM_BASE as usize;
+    const FRAME_COUNT: usize = crate::boards::PHYS_DRAM_SIZE as usize / PAGE_SIZE;
+    static mut STATES: [FrameState; FRAME_COUNT] = [FrameState::Free; FRAME_COUNT];
+
+    let kernel_end = kernel_virt_to_phys(VirtualAddress::new(addr_of!(_end) as usize)).into_raw();
+    let reserved_frames = kernel_end
+        .checked_sub(PHYS_BASE)
+        .expect("kernel image lies below physical RAM")
+        .div_ceil(PAGE_SIZE);
+    assert!(
+        reserved_frames <= FRAME_COUNT,
+        "kernel image exceeds physical RAM"
+    );
+
+    // SAFETY: CPU0 calls this once after runtime initialization. The static
+    // array is exclusively transferred to FirstFit. _end includes this array,
+    // the kernel, stacks and boot table; heap backing is allocated afterwards.
     unsafe {
-        if INIT_HEAP_DONE {
-            return;
-        }
-        allocator::init_heap(addr_of_mut!(__heap_start), addr_of_mut!(__heap_end));
-        INIT_HEAP_DONE = true;
+        let states = &mut *addr_of_mut!(STATES);
+        states[..reserved_frames].fill(FrameState::Reserved);
+        FirstFitFrameAllocator::instance()
+            .init(PhysicalAddress::new(PHYS_BASE), PAGE_SIZE, states)
+            .expect("failed to initialize FirstFit frame allocator");
     }
+}
+
+#[inline(never)]
+pub(crate) fn init_heap() {
+    if INIT_HEAP_DONE.load(Ordering::Acquire) {
+        return;
+    }
+    #[cfg(paging)]
+    {
+        if arch::current_cpu_id() == 0 {
+            #[cfg(not(allocator_buddy))]
+            init_frames();
+        }
+        crate::mm::kernel_space::init()
+            .expect("failed to initialize kernel heap and address space");
+    }
+    #[cfg(not(paging))]
+    allocator::init_heap(addr_of_mut!(__heap_start), addr_of_mut!(__heap_end));
+    INIT_HEAP_DONE.store(true, Ordering::Release);
 }

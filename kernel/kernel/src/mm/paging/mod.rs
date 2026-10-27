@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod first_fit;
+pub mod mapper;
+
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{
-    arch::page::PAGE_FORMAT,
-    mm::{CachePolicy, MemAttribute, MemFlags, MemType},
-};
+use crate::mm::{CachePolicy, MemAttribute, MemFlags, MemType, PhysicalAddress};
 
+// Used before BSS initialization; retain publication when CPU0 clears BSS so
+// secondary CPUs can still enter through the shared bootstrap table.
+#[cfg_attr(compatible_old_toolchain, link_section = ".data")]
+#[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
 static PAGETABLE_INIT_DONE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Copy, Clone)]
@@ -88,7 +92,45 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
 }
 
 pub trait PageFormat {
+    const PAGE_SIZE: usize;
+    const LEVELS: u8;
+    const VIRT_ADDR_BITS: u8;
+    const PHYS_ADDR_BITS: u8;
+
     fn get_translate(base: usize, att: MemAttribute, is_block: bool) -> usize;
-    #[inline(always)]
     fn get_index(base: usize, level: u8) -> usize;
+    /// Encode a descriptor pointing to the next page-table level.
+    fn table_descriptor(base: usize) -> usize;
+    /// Decode a table/page descriptor; invalid and block entries return None.
+    fn table_address(entry: usize) -> Option<usize>;
+    fn is_valid(entry: usize) -> bool;
+}
+
+#[derive(Debug)]
+pub struct FrameUsage {
+    used: usize,
+    total: usize,
+}
+
+impl FrameUsage {
+    pub fn new(used: usize, total: usize) -> Self {
+        FrameUsage { used, total }
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+
+    pub fn used(&self) -> usize {
+        self.used
+    }
+
+    pub fn free(&self) -> usize {
+        self.total - self.used
+    }
+}
+
+pub unsafe trait FrameAllocator {
+    // allocate a frame
+    fn alloc_frame(&mut self) -> Option<PhysicalAddress>;
 }

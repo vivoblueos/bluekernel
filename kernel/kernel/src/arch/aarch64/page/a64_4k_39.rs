@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mm::{
-    paging::PageFormat, CachePolicy, MemAttribute, MemFlags, MemType,
-};
+use crate::mm::{paging::PageFormat, CachePolicy, MemAttribute, MemFlags, MemType};
 use tock_registers::{interfaces::*, register_bitfields, registers::InMemoryRegister};
 
 const OUTPUT_ADDR_MASK: usize = 0x0000_ffff_ffff_f000;
@@ -97,6 +95,24 @@ register_bitfields! {usize,
 pub struct PageEntry;
 
 impl PageFormat for PageEntry {
+    const PAGE_SIZE: usize = 4096;
+    const LEVELS: u8 = 3;
+    const VIRT_ADDR_BITS: u8 = 39;
+    // Matches TCR_EL1.IPS configured by the AArch64 MMU setup.
+    const PHYS_ADDR_BITS: u8 = 32;
+
+    fn table_descriptor(base: usize) -> usize {
+        (base & OUTPUT_ADDR_MASK) | 0b11
+    }
+
+    fn table_address(entry: usize) -> Option<usize> {
+        (entry & 0b11 == 0b11).then_some(entry & OUTPUT_ADDR_MASK)
+    }
+
+    fn is_valid(entry: usize) -> bool {
+        entry & 1 != 0
+    }
+
     fn get_translate(base: usize, att: MemAttribute, is_block: bool) -> usize {
         let flags = att.flags;
         if !flags.intersects(MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE) {
@@ -124,19 +140,19 @@ impl PageFormat for PageEntry {
 
         let entry = InMemoryRegister::<usize, LEAF_PAGE::Register>::new(0);
         entry.write(
-            LEAF_PAGE::VALID::Valid
-                + LEAF_PAGE::AF::True
-                + LEAF_PAGE::ATTRINDX.val(memory_index),
+            LEAF_PAGE::VALID::Valid + LEAF_PAGE::AF::True + LEAF_PAGE::ATTRINDX.val(memory_index),
         );
-        entry.modify(match (
-            flags.contains(MemFlags::USER),
-            flags.contains(MemFlags::WRITE),
-        ) {
-            (false, false) => LEAF_PAGE::AP::EL1_RO,
-            (false, true) => LEAF_PAGE::AP::EL1_RW,
-            (true, false) => LEAF_PAGE::AP::EL0_RO,
-            (true, true) => LEAF_PAGE::AP::EL0_RW,
-        });
+        entry.modify(
+            match (
+                flags.contains(MemFlags::USER),
+                flags.contains(MemFlags::WRITE),
+            ) {
+                (false, false) => LEAF_PAGE::AP::EL1_RO,
+                (false, true) => LEAF_PAGE::AP::EL1_RW,
+                (true, false) => LEAF_PAGE::AP::EL0_RO,
+                (true, true) => LEAF_PAGE::AP::EL0_RW,
+            },
+        );
 
         if !flags.contains(MemFlags::EXECUTE) || flags.contains(MemFlags::USER) {
             entry.modify(LEAF_PAGE::PXN::True);

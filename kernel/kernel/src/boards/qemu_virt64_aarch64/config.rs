@@ -31,6 +31,17 @@ pub const GICR: usize = mmu::kernel_phys_to_virt(PhysicalAddress::new(0x80a0000)
 pub const MMU_L1_NORMAL_BASES: &[u64] = &[0x4008_0000];
 pub const MMU_L1_DEVICE_BASES: &[u64] = &[0x0];
 
+/// Physical MMIO windows required by the kernel, mapped as device memory.
+pub const KERNEL_DEVICE_REGIONS: &[(usize, usize)] = &[
+    (0x0800_0000, 0x1_0000), // GIC distributor
+    (
+        0x080a_0000,
+        blueos_kconfig::CONFIG_NUM_CORES as usize * 0x2_0000,
+    ),
+    (0x0900_0000, 0x1000), // PL011 UART
+    (0x0a00_0000, 0x4000), // VirtIO MMIO transports
+];
+
 // Physical memory range for buddy allocator (QEMU virt defaults to 128MB).
 pub const PHYS_DRAM_BASE: u64 = 0x4000_0000;
 pub const PHYS_DRAM_SIZE: u64 = 128 * 1024 * 1024;
