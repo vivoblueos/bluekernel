@@ -19,11 +19,12 @@
 import("//build/config/gnrt_sync.gni")
 
 template("cargo_spec") {
-  assert(label_matches(get_label_info(":" + target_name, "label_no_toolchain"),
-                       [
-                         "//external/rust:*",
-                         "//external/rust/*",
-                       ]),
+  _label = get_label_info(":" + target_name, "label_no_toolchain")
+  assert(filter_include([ _label ],
+                        [
+                          "//external/rust:*",
+                          "//external/rust/*",
+                        ]) != [],
          "cargo_spec must be declared in an approved central directory")
   assert(defined(invoker.package), "cargo_spec requires package")
   assert(defined(invoker.version), "cargo_spec requires version")
@@ -78,7 +79,6 @@ template("cargo_spec") {
     _tag = invoker.tag
   }
 
-  _label = get_label_info(":" + target_name, "label_no_toolchain")
   _prepared = gnrt_mode == "collect"
   foreach(_entry, gnrt_crate_index.crates) {
     if (_entry.proxy == _label) {

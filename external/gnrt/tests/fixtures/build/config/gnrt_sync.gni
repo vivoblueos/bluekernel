@@ -16,12 +16,7 @@
 # Build mode reads it, collect mode runs before it exists.
 if (gnrt_mode == "build") {
   gnrt_crate_index_path = "//external/vendor/gnrt_crate_index.json"
-  assert(
-      path_exists(gnrt_crate_index_path),
-      "Cannot find $gnrt_crate_index_path. Run `gnrt sync` first to generate it.")
   _gnrt_state_path = "//external/vendor/gnrt_sync_state.json"
-  assert(path_exists(_gnrt_state_path),
-         "Run gnrt sync before generating build rules.")
   _gnrt_check_args = [
     "--root",
     rebase_path("//"),
@@ -36,6 +31,8 @@ if (gnrt_mode == "build") {
                              _gnrt_check_args + [ "--inputs-only" ],
                              "json",
                              [ _gnrt_state_path ])
+  assert(_gnrt_inputs.valid,
+         _gnrt_inputs.reason + " " + _gnrt_inputs.sync_command)
   _gnrt_dependencies = []
   foreach(_input, _gnrt_inputs.inputs) {
     _gnrt_dependencies += [ "//" + _input ]
