@@ -376,7 +376,7 @@ impl SmpStagedInit {
             if id != 0 {
                 return;
             }
-            self.stage.fetch_add(1, Ordering::Relaxed);
+            self.stage.fetch_add(1, Ordering::Release);
             return;
         }
         if id != 0 {
@@ -389,7 +389,7 @@ impl SmpStagedInit {
             }
         }
         f();
-        self.stage.fetch_add(1, Ordering::Relaxed);
+        self.stage.fetch_add(1, Ordering::Release);
     }
 }
 

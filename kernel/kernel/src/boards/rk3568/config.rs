@@ -14,7 +14,7 @@
 
 use crate::{
     arch::irq::IrqNumber,
-    mm::{kernel_phys_to_virt, PhysicalAddress},
+    mm::{kernel_phys_to_virt, memory_bank::MemoryBank, PhysicalAddress},
 };
 
 pub const APBP_CLOCK: u32 = 0x16e3600;
@@ -26,8 +26,6 @@ pub const HEAP_SIZE: u64 = 16 * 1024 * 1024;
 pub const PSCI_BASE: u32 = 0x84000000;
 pub const GICD: usize = kernel_phys_to_virt(PhysicalAddress::new(0xfd400000)).into_raw();
 pub const GICR: usize = kernel_phys_to_virt(PhysicalAddress::new(0xfd460000)).into_raw();
-pub const MMU_L1_NORMAL_BASES: &[u64] = &[0x0, 0x4000_0000];
-pub const MMU_L1_DEVICE_BASES: &[u64] = &[0xc000_0000];
 
 /// Physical MMIO windows required by the kernel, mapped as device memory.
 pub const KERNEL_DEVICE_REGIONS: &[(usize, usize)] = &[
@@ -46,12 +44,23 @@ pub const PHYS_DRAM_SIZE: usize = 0xefe0_0000;
 // Offset from the 2MiB-aligned base, published in the arm64 Image header.
 pub const TEXT_OFFSET: usize = blueos_kconfig::CONFIG_KERNEL_PHYS_BASE as usize % (2 * 1024 * 1024);
 
-// FIXME: The following memory banks are hardcoded for now. In the future, we should
-//        parse the memory banks from the device tree or firmware-provided memory map.
-//        This will be different for each board, so we should move this to the board-specific config file.
-// pub const MemoryBanks: [crate::mm::memory_bank::MemoryBank; 1] = [
-//     crate::mm::memory_bank::MemoryBank {
-//         start: PhysicalAddress::new(0x20_0000),
-//         end: PhysicalAddress::new(0xeced_affff),
-//     },
-// ];
+// FIXME: Parse the memory banks from the device tree or firmware memory map.
+// Keep MMIO last so device attributes take precedence in shared bootstrap blocks.
+pub const MEMORY_BANKS: &[MemoryBank] = &[
+    MemoryBank::RAM((
+        PhysicalAddress::new(PHYS_DRAM_BASE),
+        PhysicalAddress::new(PHYS_DRAM_BASE + PHYS_DRAM_SIZE),
+    )),
+    MemoryBank::MMIO((
+        PhysicalAddress::new(0xfd40_0000),
+        PhysicalAddress::new(0xfd41_0000),
+    )),
+    MemoryBank::MMIO((
+        PhysicalAddress::new(0xfd46_0000),
+        PhysicalAddress::new(0xfd46_0000 + blueos_kconfig::CONFIG_NUM_CORES as usize * 0x2_0000),
+    )),
+    MemoryBank::MMIO((
+        PhysicalAddress::new(0xfe66_0000),
+        PhysicalAddress::new(0xfe66_1000),
+    )),
+];

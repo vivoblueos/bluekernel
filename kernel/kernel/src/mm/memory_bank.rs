@@ -22,16 +22,14 @@
 
 use core::ptr::addr_of;
 
-use crate::mm::{MemFlags, PhysicalAddress, VirtualAddress, kernel_virt_to_phys};
+use crate::mm::{kernel_virt_to_phys, MemFlags, PhysicalAddress, VirtualAddress};
 use heapless::Vec;
 
 const MAX_REGIONS: usize = 128;
 
-pub struct MemoryBank {
-    /// The start of the memory bank, inclusive.
-    pub start: PhysicalAddress,
-    /// The end of the memory bank, exclusive.
-    pub end: PhysicalAddress,
+pub enum MemoryBank {
+    MMIO((PhysicalAddress, PhysicalAddress)),
+    RAM((PhysicalAddress, PhysicalAddress)),
 }
 
 #[derive(Debug)]
@@ -43,7 +41,9 @@ pub struct MemoryRegion {
     pub name: &'static str,
 }
 
-pub fn create_memory_bank_form_memory_region(banks: &[MemoryBank]) -> Vec<MemoryRegion, MAX_REGIONS> {
+pub fn create_memory_bank_form_memory_region(
+    banks: &[MemoryBank],
+) -> Vec<MemoryRegion, MAX_REGIONS> {
     let mut all_regions = Vec::new();
     let mut push = |r: MemoryRegion| {
         if r.size > 0 {
@@ -53,12 +53,12 @@ pub fn create_memory_bank_form_memory_region(banks: &[MemoryBank]) -> Vec<Memory
 
     let physical = |addr: usize| kernel_virt_to_phys(VirtualAddress::new(addr));
 
-    push(MemoryRegion { 
-        base: physical(addr_of!(__text_start) as usize), 
-        flags: MemFlags::READ | MemFlags::EXECUTE, 
-        size: addr_of!(__text_end) as usize - addr_of!(__text_start) as usize, 
-        is_reserved: true, 
-        name: ".text"
+    push(MemoryRegion {
+        base: physical(addr_of!(__text_start) as usize),
+        flags: MemFlags::READ | MemFlags::EXECUTE,
+        size: addr_of!(__text_end) as usize - addr_of!(__text_start) as usize,
+        is_reserved: true,
+        name: ".text",
     });
     push(MemoryRegion {
         base: physical(addr_of!(__rodata_start) as usize),

@@ -17,7 +17,9 @@ pub mod mapper;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::mm::{CachePolicy, MemAttribute, MemFlags, MemType, PhysicalAddress};
+use crate::mm::{
+    memory_bank::MemoryBank, CachePolicy, MemAttribute, MemFlags, MemType, PhysicalAddress,
+};
 
 // Used before BSS initialization; retain publication when CPU0 clears BSS so
 // secondary CPUs can still enter through the shared bootstrap table.
@@ -29,7 +31,7 @@ static PAGETABLE_INIT_DONE: AtomicBool = AtomicBool::new(false);
 #[repr(transparent)]
 pub struct PageEntry(usize);
 
-// Safty: Only be used before the MMU is enabled
+// Safety: Only be used before the MMU is enabled.
 pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
     let cpu_id = crate::arch::current_cpu_id();
 
@@ -49,36 +51,39 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
     }
 
     if cpu_id == 0 {
-        if crate::arch::current_cpu_id() == 0 {
-            let entries_ptr = phys_addr as *mut PageEntry;
-            unsafe {
-                core::ptr::write_bytes(entries_ptr, 0, 512);
-                let entries = core::slice::from_raw_parts_mut(entries_ptr, 512);
+        let entry_count = P::PAGE_SIZE / size_of::<PageEntry>();
+        let block_size = P::PAGE_SIZE * entry_count.pow(u32::from(P::LEVELS - 1));
+        let entries_ptr = phys_addr as *mut PageEntry;
+        unsafe {
+            core::ptr::write_bytes(entries_ptr, 0, entry_count);
+            let entries = core::slice::from_raw_parts_mut(entries_ptr, entry_count);
 
-                for &base in crate::boards::MMU_L1_DEVICE_BASES {
-                    let index = P::get_index(base as usize, 0);
-                    let v = P::get_translate(
-                        base as usize,
+            for bank in crate::boards::MEMORY_BANKS {
+                let ((start, end), attributes) = match bank {
+                    MemoryBank::MMIO(range) => (
+                        range,
                         MemAttribute {
                             flags: MemFlags::READ | MemFlags::WRITE | MemFlags::GLOBAL,
                             memory_type: MemType::Device,
                         },
-                        true,
-                    );
-                    entries[index] = PageEntry(v);
-                }
-
-                for &base in crate::boards::MMU_L1_NORMAL_BASES {
-                    let index = P::get_index(base as usize, 0);
-                    let v = P::get_translate(
-                        base as usize,
+                    ),
+                    MemoryBank::RAM(range) => (
+                        range,
                         MemAttribute {
                             flags: MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE,
                             memory_type: MemType::Normal(CachePolicy::WriteBack),
                         },
-                        true,
-                    );
-                    entries[index] = PageEntry(v);
+                    ),
+                };
+                if start.into_raw() >= end.into_raw() {
+                    continue;
+                }
+                // Bootstrap uses root-level blocks (1 GiB for AArch64 4K/39).
+                // Cover every block intersecting the bank's [start, end) range.
+                let start = start.into_raw() & !(block_size - 1);
+                for base in (start..end.into_raw()).step_by(block_size) {
+                    let index = P::get_index(base, 0);
+                    entries[index] = PageEntry(P::get_translate(base, attributes, true));
                 }
             }
         }

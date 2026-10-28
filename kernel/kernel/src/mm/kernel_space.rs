@@ -69,9 +69,15 @@ impl KernelAddressSpace {
         if start == end {
             return Ok(());
         }
-        let len = end.into_raw().checked_sub(start.into_raw()).ok_or("reversed kernel mapping")?;
+        let len = end
+            .into_raw()
+            .checked_sub(start.into_raw())
+            .ok_or("reversed kernel mapping")?;
         let virt = kernel_phys_to_virt(start);
-        let virt_end = virt.into_raw().checked_add(len).ok_or("kernel mapping overflow")?;
+        let virt_end = virt
+            .into_raw()
+            .checked_add(len)
+            .ok_or("kernel mapping overflow")?;
         self.mapper.map_range(
             virt,
             start,
@@ -131,7 +137,8 @@ impl KernelAddressSpace {
         let len = pages
             .checked_mul(PageEntry::PAGE_SIZE)
             .ok_or("kernel heap size overflow")?;
-        let end = start.into_raw()
+        let end = start
+            .into_raw()
             .checked_add(len)
             .ok_or("kernel heap address overflow")?;
         // FIXME: Temporarily make the heap executable so the ELF loader tests pass.
@@ -141,8 +148,8 @@ impl KernelAddressSpace {
             end,
             MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE,
         )?;
-        let first = FrameAllocator::alloc_frame(&mut allocator)
-            .ok_or("out of kernel heap frames")?;
+        let first =
+            FrameAllocator::alloc_frame(&mut allocator).ok_or("out of kernel heap frames")?;
         // Reserve all heap frames before allocating any further page tables.
         // This preserves physical contiguity required by existing DMA buffers.
         for offset in (PageEntry::PAGE_SIZE..len).step_by(PageEntry::PAGE_SIZE) {
@@ -222,11 +229,21 @@ impl KernelAddressSpace {
                 2 => MemFlags::READ,
                 _ => MemFlags::READ | MemFlags::WRITE,
             };
-            space.map_linear(PhysicalAddress::new(range[0]), PhysicalAddress::new(range[1]), flags, normal)?;
+            space.map_linear(
+                PhysicalAddress::new(range[0]),
+                PhysicalAddress::new(range[1]),
+                flags,
+                normal,
+            )?;
         }
         for &(base, size) in crate::boards::KERNEL_DEVICE_REGIONS {
             let end = base.checked_add(size).ok_or("device mapping overflow")?;
-            space.map_linear(PhysicalAddress::new(base), PhysicalAddress::new(end), MemFlags::READ | MemFlags::WRITE, MemType::Device)?;
+            space.map_linear(
+                PhysicalAddress::new(base),
+                PhysicalAddress::new(end),
+                MemFlags::READ | MemFlags::WRITE,
+                MemType::Device,
+            )?;
         }
         let heap_start = addr_of!(__heap_start) as usize;
         let heap_end = space.map_heap(VirtualAddress::new(heap_start))?;

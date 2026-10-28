@@ -271,7 +271,7 @@ pub(crate) fn init_heap() {
     if INIT_HEAP_DONE.load(Ordering::Acquire) {
         return;
     }
-    
+
     #[cfg(not(paging))]
     allocator::init_heap(addr_of_mut!(__heap_start), addr_of_mut!(__heap_end));
     INIT_HEAP_DONE.store(true, Ordering::Release);
