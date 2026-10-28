@@ -15,7 +15,10 @@
 //! Global first-fit allocator backed by a static array of physical frame states.
 
 use super::{FrameAllocator, FrameUsage};
-use crate::{mm::PhysicalAddress, sync::SpinLock};
+use crate::{
+    mm::{memory_bank::MemoryRegion, PhysicalAddress},
+    sync::SpinLock,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -23,6 +26,52 @@ pub enum FrameState {
     Free,
     Reserved,
     Allocated,
+}
+
+/// Initialize frame states from available RAM and overlapping reservations.
+/// Only complete pages of RAM become free; any overlap with a reservation
+/// reserves the whole page. Gaps outside the described RAM remain reserved.
+pub fn init_frame_states(
+    base: PhysicalAddress,
+    page_size: usize,
+    states: &mut [FrameState],
+    regions: &[MemoryRegion],
+) -> Option<()> {
+    let base = base.into_raw();
+    if !page_size.is_power_of_two() || base & (page_size - 1) != 0 {
+        return None;
+    }
+    let end = base.checked_add(states.len().checked_mul(page_size)?)?;
+    states.fill(FrameState::Reserved);
+    // Available banks can overlap reservations; apply reservations last.
+    for is_reserved in [false, true] {
+        for region in regions.iter().filter(|r| r.is_reserved == is_reserved) {
+            let start = region.base.into_raw();
+            let region_end = start.checked_add(region.size)?;
+            let start = start.max(base);
+            let region_end = region_end.min(end);
+            if start >= region_end {
+                continue;
+            }
+            let (first, last, state) = if is_reserved {
+                (
+                    (start - base) / page_size,
+                    (region_end - base).div_ceil(page_size),
+                    FrameState::Reserved,
+                )
+            } else {
+                (
+                    (start - base).div_ceil(page_size),
+                    (region_end - base) / page_size,
+                    FrameState::Free,
+                )
+            };
+            if first < last {
+                states[first..last].fill(state);
+            }
+        }
+    }
+    Some(())
 }
 
 struct AllocatorState {

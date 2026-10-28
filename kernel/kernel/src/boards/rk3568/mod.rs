@@ -25,8 +25,6 @@ use blueos_hal::isr::IsrDesc;
 static STAGING: SmpStagedInit = SmpStagedInit::new();
 
 pub(crate) fn init() {
-    #[cfg(smp)]
-    crate::kearly_println!("[SMP] CPU{}: board init", arch::current_cpu_id());
     STAGING.run(0, true, crate::boot::init_runtime);
     STAGING.run(1, true, || {
         #[cfg(paging)]
@@ -46,10 +44,6 @@ pub(crate) fn init() {
             use crate::mm::kernel_space::KernelAddressSpace;
             let space = KernelAddressSpace::get().expect("kernel address space not initialized");
             unsafe { arch::mmu::activate_kernel_table(space.root_address()) };
-            crate::kearly_println!(
-                "[SMP] CPU{}: kernel page table installed",
-                arch::current_cpu_id()
-            );
         }
         arch::vector::init();
     });
@@ -62,8 +56,6 @@ pub(crate) fn init() {
         )
     });
     STAGING.run(4, false, arch::irq::cpu_init);
-    #[cfg(smp)]
-    crate::kearly_println!("[SMP] CPU{}: GIC ready", arch::current_cpu_id());
     STAGING.run(5, false, || {
         irq::enable_irq_with_priority(
             config::CONSOLE_UART_IRQNUM,
@@ -82,7 +74,6 @@ pub(crate) fn init() {
     STAGING.run(7, true, || arch::secondary_cpu_setup(config::PSCI_BASE));
     #[cfg(smp)]
     if arch::current_cpu_id() != 0 {
-        crate::kearly_println!("[SMP] CPU{}: waiting for scheduler", arch::current_cpu_id());
         scheduler::wait_and_then_start_schedule();
         unreachable!("Secondary cores should have jumped to the scheduler");
     }

@@ -41,7 +41,11 @@ pub struct MemoryRegion {
     pub name: &'static str,
 }
 
-pub fn create_memory_bank_form_memory_region(
+/// Describe RAM banks and the reserved boot image without allocating from the heap.
+///
+/// RAM bank regions overlap the reserved image regions. Consumers must give
+/// reservations precedence over available RAM, regardless of region order.
+pub fn create_memory_region_from_memory_bank(
     banks: &[MemoryBank],
 ) -> Vec<MemoryRegion, MAX_REGIONS> {
     let mut all_regions = Vec::new();
@@ -52,27 +56,63 @@ pub fn create_memory_bank_form_memory_region(
     };
 
     let physical = |addr: usize| kernel_virt_to_phys(VirtualAddress::new(addr));
+    let kernel_start = physical(addr_of!(__text_start) as usize).into_raw();
 
+    for bank in banks {
+        let MemoryBank::RAM((start, end)) = bank else {
+            continue;
+        };
+        push(MemoryRegion {
+            base: *start,
+            flags: MemFlags::READ | MemFlags::WRITE,
+            size: end
+                .into_raw()
+                .checked_sub(start.into_raw())
+                .expect("reversed memory bank"),
+            is_reserved: false,
+            name: "RAM",
+        });
+        if start.into_raw() < kernel_start {
+            // Preserve firmware/boot data before the image (e.g. QEMU's FDT).
+            push(MemoryRegion {
+                base: *start,
+                flags: MemFlags::READ | MemFlags::WRITE,
+                size: end.into_raw().min(kernel_start) - start.into_raw(),
+                is_reserved: true,
+                name: "boot data",
+            });
+        }
+    }
+
+    // Extend sections to the next linker boundary to reserve their alignment
+    // padding too. The entire image through _end must remain unavailable.
     push(MemoryRegion {
         base: physical(addr_of!(__text_start) as usize),
         flags: MemFlags::READ | MemFlags::EXECUTE,
-        size: addr_of!(__text_end) as usize - addr_of!(__text_start) as usize,
+        size: addr_of!(__rodata_start) as usize - addr_of!(__text_start) as usize,
         is_reserved: true,
         name: ".text",
     });
     push(MemoryRegion {
         base: physical(addr_of!(__rodata_start) as usize),
-        size: addr_of!(__rodata_end) as usize - addr_of!(__rodata_start) as usize,
+        size: addr_of!(__data_start) as usize - addr_of!(__rodata_start) as usize,
         flags: MemFlags::READ,
         is_reserved: true,
         name: ".rodata",
     });
     push(MemoryRegion {
         base: physical(addr_of!(__data_start) as usize),
-        size: addr_of!(__data_end) as usize - addr_of!(__data_start) as usize,
+        size: addr_of!(__bss_start) as usize - addr_of!(__data_start) as usize,
         flags: MemFlags::READ | MemFlags::WRITE,
         is_reserved: true,
         name: ".data .tdata .tbss .percpu",
+    });
+    push(MemoryRegion {
+        base: physical(addr_of!(__bss_start) as usize),
+        size: addr_of!(__sys_stack_start) as usize - addr_of!(__bss_start) as usize,
+        flags: MemFlags::READ | MemFlags::WRITE,
+        is_reserved: true,
+        name: ".bss .init_array .bk_app_array",
     });
     push(MemoryRegion {
         base: physical(addr_of!(__sys_stack_start) as usize),
@@ -82,11 +122,11 @@ pub fn create_memory_bank_form_memory_region(
         name: "boot stack",
     });
     push(MemoryRegion {
-        base: physical(addr_of!(__bss_start) as usize),
-        size: addr_of!(__bss_end) as usize - addr_of!(__bss_start) as usize,
+        base: physical(addr_of!(__sys_stack_end) as usize),
+        size: addr_of!(_end) as usize - addr_of!(__sys_stack_end) as usize,
         flags: MemFlags::READ | MemFlags::WRITE,
         is_reserved: true,
-        name: ".bss",
+        name: "boot page table",
     });
 
     all_regions
@@ -94,13 +134,9 @@ pub fn create_memory_bank_form_memory_region(
 
 unsafe extern "C" {
     static __text_start: u8;
-    static __text_end: u8;
     static __rodata_start: u8;
-    static __rodata_end: u8;
     static __data_start: u8;
-    static __data_end: u8;
     static __bss_start: u8;
-    static __bss_end: u8;
     static __sys_stack_start: u8;
     static __sys_stack_end: u8;
     static _end: u8;

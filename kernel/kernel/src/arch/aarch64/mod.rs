@@ -596,8 +596,6 @@ pub fn secondary_cpu_setup(psci_base: u32) {
     .into_raw();
     for i in 1..blueos_kconfig::CONFIG_NUM_CORES {
         let affinity = cpu_affinity(i as usize);
-        #[cfg(soc_rk3568)]
-        crate::kearly_println!("[SMP] CPU{}: PSCI CPU_ON affinity={:#x}", i, affinity);
         let result = psci::cpu_on(psci_base, affinity, secondary_entry, 0);
         if result != 0 {
             crate::kearly_println!("[SMP] CPU{}: PSCI CPU_ON failed: {}", i, result);

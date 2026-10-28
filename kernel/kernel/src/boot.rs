@@ -231,35 +231,27 @@ fn init_apps() {
 #[cfg(all(paging, not(allocator_buddy)))]
 pub(crate) fn init_frames() {
     use crate::mm::{
-        kernel_virt_to_phys,
+        memory_bank::create_memory_region_from_memory_bank,
         paging::{
-            first_fit::{FirstFitFrameAllocator, FrameState},
+            first_fit::{init_frame_states, FirstFitFrameAllocator, FrameState},
             PageFormat,
         },
-        PhysicalAddress, VirtualAddress,
+        PhysicalAddress,
     };
 
     const PAGE_SIZE: usize = <crate::arch::page::PageEntry as PageFormat>::PAGE_SIZE;
     const PHYS_BASE: usize = crate::boards::PHYS_DRAM_BASE as usize;
     const FRAME_COUNT: usize = crate::boards::PHYS_DRAM_SIZE as usize / PAGE_SIZE;
     static mut STATES: [FrameState; FRAME_COUNT] = [FrameState::Free; FRAME_COUNT];
-
-    let kernel_end = kernel_virt_to_phys(VirtualAddress::new(addr_of!(_end) as usize)).into_raw();
-    let reserved_frames = kernel_end
-        .checked_sub(PHYS_BASE)
-        .expect("kernel image lies below physical RAM")
-        .div_ceil(PAGE_SIZE);
-    assert!(
-        reserved_frames <= FRAME_COUNT,
-        "kernel image exceeds physical RAM"
-    );
+    let regions = create_memory_region_from_memory_bank(crate::boards::MEMORY_BANKS);
 
     // SAFETY: CPU0 calls this once after runtime initialization. The static
-    // array is exclusively transferred to FirstFit. _end includes this array,
-    // the kernel, stacks and boot table; heap backing is allocated afterwards.
+    // array is exclusively transferred to FirstFit. The reserved regions cover
+    // this array, the kernel, stacks and boot table; heap backing follows later.
     unsafe {
         let states = &mut *addr_of_mut!(STATES);
-        states[..reserved_frames].fill(FrameState::Reserved);
+        init_frame_states(PhysicalAddress::new(PHYS_BASE), PAGE_SIZE, states, &regions)
+            .expect("invalid physical memory regions");
         FirstFitFrameAllocator::instance()
             .init(PhysicalAddress::new(PHYS_BASE), PAGE_SIZE, states)
             .expect("failed to initialize FirstFit frame allocator");
