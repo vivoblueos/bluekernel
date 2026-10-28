@@ -418,6 +418,29 @@ impl BuddyAllocator {
         self.free_pages(PageFrame(pfn), order);
     }
 
+    /// Return the order of a live allocation whose head is `pfn`.
+    pub fn pfn_to_order(&self, pfn: usize) -> Option<usize> {
+        if !self.initialized || pfn >= self.total_pages {
+            return None;
+        }
+        let page = unsafe { &*self.pfn_to_page(pfn) };
+        (page.state == PageState::Allocated).then_some(page.order as usize)
+    }
+
+    /// Allow callers to query the size of the largest contiguous memory block
+    /// they can currently allocate.
+    pub fn max_free_block_size(&self) -> usize {
+        if !self.initialized {
+            return 0;
+        }
+        for order in (0..=MAX_ORDER).rev() {
+            if self.free_lists[order].front().is_some() {
+                return PAGE_SIZE << order;
+            }
+        }
+        0
+    }
+
     /// Return current page accounting information.
     pub fn memory_info(&self) -> BuddyMemoryInfo {
         if !self.initialized {
