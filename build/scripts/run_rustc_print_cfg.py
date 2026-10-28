@@ -64,7 +64,8 @@ def host_triple(command):
 
 
 def print_cfg(command, target):
-    output = run_rustc_empty_ok(command, ["--target", target, "--print", "cfg"])
+    output = run_rustc_empty_ok(command,
+                                ["--target", target, "--print", "cfg"])
     for line in output.stdout.splitlines():
         line = line.strip()
         if line:

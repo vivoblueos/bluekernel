@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Rewrite aliased_deps with the same bindings used for Rust dependencies."""
 
 import json
@@ -25,7 +24,8 @@ def canonical_label(label, directory, toolchain):
         label, toolchain = label.rsplit("(", 1)
         toolchain = toolchain.removesuffix(")")
     if not label.startswith("//"):
-        label = directory + label if label.startswith(":") else directory + "/" + label
+        label = directory + label if label.startswith(
+            ":") else directory + "/" + label
     if ":" not in label:
         label += ":" + posixpath.basename(label)
     path, name = label.rsplit(":", 1)
@@ -38,17 +38,22 @@ def resolve(data):
     if len(data["original_deps"]) != len(data["resolved_deps"]):
         raise ValueError("original and resolved dependency counts differ")
     mappings = {}
-    for original, resolved in zip(data["original_deps"], data["resolved_deps"]):
-        original = canonical_label(original, data["directory"], data["toolchain"])
-        resolved = canonical_label(resolved, data["directory"], data["toolchain"])
+    for original, resolved in zip(data["original_deps"],
+                                  data["resolved_deps"]):
+        original = canonical_label(original, data["directory"],
+                                   data["toolchain"])
+        resolved = canonical_label(resolved, data["directory"],
+                                   data["toolchain"])
         if original in mappings and mappings[original] != resolved:
             raise ValueError(f"ambiguous dependency binding for {original}")
         mappings[original] = resolved
     aliases = {}
     for name, label in data["aliases"].items():
-        canonical = canonical_label(label, data["directory"], data["toolchain"])
+        canonical = canonical_label(label, data["directory"],
+                                    data["toolchain"])
         if canonical not in mappings:
-            raise ValueError(f"alias {name} does not match a dependency: {label}")
+            raise ValueError(
+                f"alias {name} does not match a dependency: {label}")
         aliases[name] = mappings[canonical]
     return aliases
 

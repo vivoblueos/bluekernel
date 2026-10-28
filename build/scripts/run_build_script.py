@@ -18,7 +18,6 @@
 # Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """Run a Cargo build script and collect its rustc flags and environment.
 
 GN supplies target cfgs and Cargo environment variables. Generated files stay
@@ -45,16 +44,36 @@ RUSTC_FLAGS_LINE = re.compile("cargo::?rustc-flags=(.*)")
 LINK_SEARCH_NATIVE = re.compile("native=(.*)")
 
 NATIVE_VARIABLES = (
-    'CC', 'CXX', 'AR', 'RANLIB', 'NVCC', 'CC_MASM_ASM', 'CXXSTDLIB',
-    'CXXSTDLIB_STATIC', 'CFLAGS', 'CXXFLAGS', 'ARFLAGS', 'RANLIBFLAGS',
+    'CC',
+    'CXX',
+    'AR',
+    'RANLIB',
+    'NVCC',
+    'CC_MASM_ASM',
+    'CXXSTDLIB',
+    'CXXSTDLIB_STATIC',
+    'CFLAGS',
+    'CXXFLAGS',
+    'ARFLAGS',
+    'RANLIBFLAGS',
 )
 NATIVE_SETTINGS = (
-    'CROSS_COMPILE', 'CRATE_CC_NO_DEFAULTS', 'RUSTC_LINKER', 'SDKROOT',
-    'MACOSX_DEPLOYMENT_TARGET', 'IPHONEOS_DEPLOYMENT_TARGET',
-    'TVOS_DEPLOYMENT_TARGET', 'WATCHOS_DEPLOYMENT_TARGET',
-    'XROS_DEPLOYMENT_TARGET', 'WASI_SDK_PATH', 'WASI_SYSROOT',
-    'WASM_MUSL_SYSROOT', 'PAUTHTEST_SYSROOT', 'PAUTHTEST_RESOURCE_DIR',
-    'VCINSTALLDIR', 'VSINSTALLDIR',
+    'CROSS_COMPILE',
+    'CRATE_CC_NO_DEFAULTS',
+    'RUSTC_LINKER',
+    'SDKROOT',
+    'MACOSX_DEPLOYMENT_TARGET',
+    'IPHONEOS_DEPLOYMENT_TARGET',
+    'TVOS_DEPLOYMENT_TARGET',
+    'WATCHOS_DEPLOYMENT_TARGET',
+    'XROS_DEPLOYMENT_TARGET',
+    'WASI_SDK_PATH',
+    'WASI_SYSROOT',
+    'WASM_MUSL_SYSROOT',
+    'PAUTHTEST_SYSROOT',
+    'PAUTHTEST_RESOURCE_DIR',
+    'VCINSTALLDIR',
+    'VSINSTALLDIR',
 )
 
 
@@ -99,26 +118,35 @@ def read_native_context(path, host, target):
     """Reads and validates GN's native tools and argument arrays."""
     with open(path, encoding='utf8') as source:
         context = json.load(source)
-    if not isinstance(context, dict) or set(context) != {'version', 'host', 'target'}:
-        raise ValueError('native context must contain version, host, and target')
+    if not isinstance(context, dict) or set(context) != {
+            'version', 'host', 'target'
+    }:
+        raise ValueError(
+            'native context must contain version, host, and target')
     if type(context['version']) is not int or context['version'] != 1:
         raise ValueError('unsupported native context version')
     fields = {'triple', 'cc', 'cxx', 'ar', 'cflags', 'cxxflags', 'arflags'}
     for role, triple in [('host', host), ('target', target)]:
         entry = context[role]
         if not isinstance(entry, dict) or set(entry) != fields:
-            raise ValueError(f'native context {role} must contain {sorted(fields)}')
+            raise ValueError(
+                f'native context {role} must contain {sorted(fields)}')
         if entry['triple'] != triple:
-            raise ValueError(f'native context {role} triple does not match {triple}')
+            raise ValueError(
+                f'native context {role} triple does not match {triple}')
         for name in ('cc', 'cxx', 'ar'):
             value = entry[name]
-            if not isinstance(value, str) or not value.strip() or '\0' in value:
-                raise ValueError(f'native context {role}.{name} must be a tool command')
+            if not isinstance(value,
+                              str) or not value.strip() or '\0' in value:
+                raise ValueError(
+                    f'native context {role}.{name} must be a tool command')
         for name in ('cflags', 'cxxflags', 'arflags'):
             value = entry[name]
             if not isinstance(value, list) or any(
-                    not isinstance(flag, str) or '\0' in flag for flag in value):
-                raise ValueError(f'native context {role}.{name} must be a string array')
+                    not isinstance(flag, str) or '\0' in flag
+                    for flag in value):
+                raise ValueError(
+                    f'native context {role}.{name} must be a string array')
     return context
 
 
@@ -126,9 +154,8 @@ def set_native_context(env, context):
     """Replaces inherited cc-rs settings with GN's native contexts."""
     for key in list(env):
         if key in NATIVE_SETTINGS or any(
-                key == name or key.startswith(name + '_')
-                or key in ('HOST_' + name, 'TARGET_' + name)
-                for name in NATIVE_VARIABLES):
+                key == name or key.startswith(name + '_') or key in
+            ('HOST_' + name, 'TARGET_' + name) for name in NATIVE_VARIABLES):
             del env[key]
     for role in ('host', 'target'):
         entry = context[role]
@@ -155,15 +182,17 @@ def main():
     parser.add_argument('--rustc-flags-file',
                         required=True,
                         help='where to write the rustc flags rsp file')
-    parser.add_argument('--rustc-env-file',
-                        required=True,
-                        help='where to write the environment exported by the build script')
+    parser.add_argument(
+        '--rustc-env-file',
+        required=True,
+        help='where to write the environment exported by the build script')
     parser.add_argument('--host',
                         required=True,
                         help='host triple collected by GN, exported as HOST')
-    parser.add_argument('--rustc',
-                        required=True,
-                        help='host compiler configured by GN, exported as RUSTC')
+    parser.add_argument(
+        '--rustc',
+        required=True,
+        help='host compiler configured by GN, exported as RUSTC')
     parser.add_argument('--target',
                         required=True,
                         help='rustc target triple exported as TARGET')
@@ -178,10 +207,11 @@ def main():
                         required=True,
                         nargs='+',
                         help='rustc cfg lines collected by GN')
-    parser.add_argument('--rustflag',
-                        action='append',
-                        default=[],
-                        help='extra crate rustc argument; repeat as --rustflag=<value>')
+    parser.add_argument(
+        '--rustflag',
+        action='append',
+        default=[],
+        help='extra crate rustc argument; repeat as --rustflag=<value>')
     parser.add_argument('--stamp-file',
                         nargs='+',
                         help='build-script stamp file(s) to write')
@@ -303,9 +333,8 @@ def main():
     with action_helpers.atomic_output(args.rustc_flags_file) as output:
         output.write(flags.encode("utf-8"))
 
-    env_contents = "".join(
-        f"{key}={shell_quote(value)}\n"
-        for key, value in rustc_env.items())
+    env_contents = "".join(f"{key}={shell_quote(value)}\n"
+                           for key, value in rustc_env.items())
     with action_helpers.atomic_output(args.rustc_env_file) as output:
         output.write(env_contents.encode("utf-8"))
 

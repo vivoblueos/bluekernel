@@ -41,12 +41,12 @@ qemu_esp32_partition_table_bin = ""
 # CONFIG_ENABLE_NET=y.
 board_deps = [
   "//external/rust:enumset",
-  "//external/rust:esp-wifi-sys-esp32c6",
-  "//external/rust:esp32c6",
-  "//external/rust:smoltcp",
   "//external/rust:esp-hal",
   "//external/rust:esp-phy",
   "//external/rust:esp-radio-rtos-driver",
   "//external/rust:esp-rom-sys",
   "//external/rust:esp-sync",
+  "//external/rust:esp-wifi-sys-esp32c6",
+  "//external/rust:esp32c6",
+  "//external/rust:smoltcp",
 ]

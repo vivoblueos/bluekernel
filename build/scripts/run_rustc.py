@@ -13,7 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Run a Rust compiler with build.rs-provided environment variables.
 
 The GN rust toolchain routes every rustc/clippy invocation through this script:
@@ -40,7 +39,7 @@ import sys
 _ENV_FILE_VAR = "BUILD_SCRIPT_RUSTC_ENV_FILE"
 
 # Variables used by this wrapper that must not leak into the compiler.
-_INTERNAL_VARS = (_ENV_FILE_VAR,)
+_INTERNAL_VARS = (_ENV_FILE_VAR, )
 
 _DOUBLE_QUOTE_ESCAPES = {
     "n": "\n",
