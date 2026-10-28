@@ -18,7 +18,7 @@
 //! installing the root; modifying active tables requires a separate TLB protocol.
 
 use super::{FrameAllocator, PageFormat};
-use crate::mm::{kernel_phys_to_virt, MemAttribute, MemFlags, MemType, PhysicalAddress};
+use crate::mm::{MemAttribute, MemFlags, MemType, PhysicalAddress, VirtualAddress, kernel_phys_to_virt};
 use core::{marker::PhantomData, mem::size_of};
 
 pub struct PageMapper<F: FrameAllocator, P: PageFormat = crate::arch::page::PageEntry> {
@@ -129,26 +129,26 @@ impl<F: FrameAllocator, P: PageFormat> PageMapper<F, P> {
     /// Allocate the intermediate tables for a virtual range before assigning
     /// backing pages. Existing leaf entries are left unchanged. This lets a
     /// caller consume the remaining frames without starving table allocation.
-    pub fn prepare_range(&mut self, virt: usize, len: usize) -> Result<(), &'static str> {
+    pub fn prepare_range(&mut self, virt: VirtualAddress, len: usize) -> Result<(), &'static str> {
         if len == 0 {
             return Ok(());
         }
-        if (virt | len) & (P::PAGE_SIZE - 1) != 0 {
+        if (virt.into_raw() | len) & (P::PAGE_SIZE - 1) != 0 {
             return Err("mapping range must be page aligned");
         }
-        let end = virt
+        let end = virt.into_raw()
             .checked_add(len)
             .ok_or("virtual mapping range overflow")?;
-        if !Self::valid_va(virt)
+        if !Self::valid_va(virt.into_raw())
             || !Self::valid_va(end - 1)
-            || (virt >> P::VIRT_ADDR_BITS) != ((end - 1) >> P::VIRT_ADDR_BITS)
+            || (virt.into_raw() >> P::VIRT_ADDR_BITS) != ((end - 1) >> P::VIRT_ADDR_BITS)
         {
             return Err("mapping range exceeds address space");
         }
         let span = P::PAGE_SIZE
             .checked_mul(P::PAGE_SIZE / size_of::<usize>())
             .ok_or("page-table span overflow")?;
-        let mut addr = virt;
+        let mut addr = virt.into_raw();
         while addr < end {
             self.leaf_slot(addr)?;
             addr += (span - (addr & (span - 1))).min(end - addr);
@@ -161,26 +161,26 @@ impl<F: FrameAllocator, P: PageFormat> PageMapper<F, P> {
     /// the caller must discard the table rather than install a partial layout.
     pub fn map_range(
         &mut self,
-        virt: usize,
-        phys: usize,
+        virt: VirtualAddress,
+        phys: PhysicalAddress,
         len: usize,
         attributes: MemAttribute,
     ) -> Result<(), &'static str> {
         if len == 0 {
             return Ok(());
         }
-        if (virt | phys | len) & (P::PAGE_SIZE - 1) != 0 {
+        if (virt.into_raw() | phys.into_raw() | len) & (P::PAGE_SIZE - 1) != 0 {
             return Err("mapping range must be page aligned");
         }
-        let end = virt
+        let end = virt.into_raw()
             .checked_add(len)
             .ok_or("virtual mapping range overflow")?;
-        let phys_end = phys
+        let phys_end = phys.into_raw()
             .checked_add(len)
             .ok_or("physical mapping range overflow")?;
-        if !Self::valid_va(virt)
+        if !Self::valid_va(virt.into_raw())
             || !Self::valid_va(end - 1)
-            || (virt >> P::VIRT_ADDR_BITS) != ((end - 1) >> P::VIRT_ADDR_BITS)
+            || (virt.into_raw() >> P::VIRT_ADDR_BITS) != ((end - 1) >> P::VIRT_ADDR_BITS)
             || phys_end > (1usize << P::PHYS_ADDR_BITS)
         {
             return Err("mapping range exceeds address space");
@@ -193,14 +193,14 @@ impl<F: FrameAllocator, P: PageFormat> PageMapper<F, P> {
         {
             return Err("mapping must be readable and device memory cannot be executable");
         }
-        for addr in (virt..end).step_by(P::PAGE_SIZE) {
+        for addr in (virt.into_raw()..end).step_by(P::PAGE_SIZE) {
             if self.leaf_entry(addr).is_some() {
                 return Err("virtual page is already mapped");
             }
         }
         for offset in (0..len).step_by(P::PAGE_SIZE) {
-            let slot = self.leaf_slot(virt + offset)?;
-            unsafe { slot.write(P::get_translate(phys + offset, attributes, false)) };
+            let slot = self.leaf_slot(virt.into_raw() + offset)?;
+            unsafe { slot.write(P::get_translate(phys.into_raw() + offset, attributes, false)) };
         }
         Ok(())
     }

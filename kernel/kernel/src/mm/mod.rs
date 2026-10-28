@@ -23,6 +23,7 @@ pub mod memory_bank;
 #[cfg(paging)]
 pub mod paging;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(transparent)]
 pub struct PhysicalAddress(usize);
 
@@ -37,6 +38,7 @@ impl PhysicalAddress {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
 pub struct VirtualAddress(usize);
 

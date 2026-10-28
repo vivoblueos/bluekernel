@@ -15,12 +15,12 @@
 //! The kernel's shared virtual address space and permanent page tables.
 
 use super::{
-    address_space::{MmapFlags, Vma},
+    address_space::Vma,
     kernel_phys_to_virt,
     paging::{first_fit::FirstFitFrameAllocator, mapper::PageMapper, FrameAllocator, PageFormat},
     CachePolicy, MemAttribute, MemFlags, MemType, PhysicalAddress,
 };
-use crate::arch::page::PageEntry;
+use crate::{arch::page::PageEntry, mm::VirtualAddress};
 use spin::Once;
 
 // Eight RAM regions, one heap region, and the board's device windows.
@@ -57,19 +57,21 @@ impl KernelAddressSpace {
         self.mapper.translate(addr)
     }
 
+    /// Map a physical memory region to the kernel's virtual address space.
+    /// The physical address will be added a KERNEL_OFFSET
     fn map_linear(
         &mut self,
-        start: usize,
-        end: usize,
+        start: PhysicalAddress,
+        end: PhysicalAddress,
         flags: MemFlags,
         memory_type: MemType,
     ) -> Result<(), &'static str> {
         if start == end {
             return Ok(());
         }
-        let len = end.checked_sub(start).ok_or("reversed kernel mapping")?;
-        let virt = kernel_phys_to_virt(PhysicalAddress::new(start)).into_raw();
-        let virt_end = virt.checked_add(len).ok_or("kernel mapping overflow")?;
+        let len = end.into_raw().checked_sub(start.into_raw()).ok_or("reversed kernel mapping")?;
+        let virt = kernel_phys_to_virt(start);
+        let virt_end = virt.into_raw().checked_add(len).ok_or("kernel mapping overflow")?;
         self.mapper.map_range(
             virt,
             start,
@@ -79,21 +81,15 @@ impl KernelAddressSpace {
                 memory_type,
             },
         )?;
-        let mut vma_flags = MmapFlags::READ;
-        if flags.contains(MemFlags::WRITE) {
-            vma_flags = vma_flags | MmapFlags::WRITE;
-        }
-        if flags.contains(MemFlags::EXECUTE) {
-            vma_flags = vma_flags | MmapFlags::EXECUTE;
-        }
-        self.record_region(virt, virt_end, vma_flags)
+        let mut vma_flags = MemFlags::READ | flags;
+        self.record_region(virt.into_raw(), virt_end, vma_flags)
     }
 
     fn record_region(
         &mut self,
         start: usize,
         end: usize,
-        flags: MmapFlags,
+        flags: MemFlags,
     ) -> Result<(), &'static str> {
         if self
             .regions
@@ -113,7 +109,7 @@ impl KernelAddressSpace {
         Ok(())
     }
 
-    fn map_heap(&mut self, start: usize) -> Result<usize, &'static str> {
+    fn map_heap(&mut self, start: VirtualAddress) -> Result<usize, &'static str> {
         let mut allocator = FirstFitFrameAllocator::instance();
         let max_pages = allocator
             .usage()
@@ -135,26 +131,25 @@ impl KernelAddressSpace {
         let len = pages
             .checked_mul(PageEntry::PAGE_SIZE)
             .ok_or("kernel heap size overflow")?;
-        let end = start
+        let end = start.into_raw()
             .checked_add(len)
             .ok_or("kernel heap address overflow")?;
         // FIXME: Temporarily make the heap executable so the ELF loader tests pass.
         // Replace this workaround with dedicated executable mappings for loaded ELF code.
         self.record_region(
-            start,
+            start.into_raw(),
             end,
-            MmapFlags::READ | MmapFlags::WRITE | MmapFlags::EXECUTE,
+            MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE,
         )?;
         let first = FrameAllocator::alloc_frame(&mut allocator)
-            .ok_or("out of kernel heap frames")?
-            .into_raw();
+            .ok_or("out of kernel heap frames")?;
         // Reserve all heap frames before allocating any further page tables.
         // This preserves physical contiguity required by existing DMA buffers.
         for offset in (PageEntry::PAGE_SIZE..len).step_by(PageEntry::PAGE_SIZE) {
             let frame = FrameAllocator::alloc_frame(&mut allocator)
                 .ok_or("out of kernel heap frames")?
                 .into_raw();
-            if first.checked_add(offset) != Some(frame) {
+            if first.into_raw().checked_add(offset) != Some(frame) {
                 return Err("kernel heap frames must be physically contiguous");
             }
         }
@@ -227,14 +222,14 @@ impl KernelAddressSpace {
                 2 => MemFlags::READ,
                 _ => MemFlags::READ | MemFlags::WRITE,
             };
-            space.map_linear(range[0], range[1], flags, normal)?;
+            space.map_linear(PhysicalAddress::new(range[0]), PhysicalAddress::new(range[1]), flags, normal)?;
         }
         for &(base, size) in crate::boards::KERNEL_DEVICE_REGIONS {
             let end = base.checked_add(size).ok_or("device mapping overflow")?;
-            space.map_linear(base, end, MemFlags::READ | MemFlags::WRITE, MemType::Device)?;
+            space.map_linear(PhysicalAddress::new(base), PhysicalAddress::new(end), MemFlags::READ | MemFlags::WRITE, MemType::Device)?;
         }
         let heap_start = addr_of!(__heap_start) as usize;
-        let heap_end = space.map_heap(heap_start)?;
+        let heap_end = space.map_heap(VirtualAddress::new(heap_start))?;
         // SAFETY: the new table covers the running kernel and the newly backed
         // heap. No heap allocations were needed to construct the static region
         // metadata or the page tables. Install before writing heap metadata.

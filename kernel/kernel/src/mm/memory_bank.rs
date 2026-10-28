@@ -20,7 +20,12 @@
 //! subsystem can enumerate usable physical memory without knowing how a
 //! particular board reports it.
 
-use crate::mm::{PhysicalAddress, VirtualAddress};
+use core::ptr::addr_of;
+
+use crate::mm::{MemFlags, PhysicalAddress, VirtualAddress, kernel_virt_to_phys};
+use heapless::Vec;
+
+const MAX_REGIONS: usize = 128;
 
 pub struct MemoryBank {
     /// The start of the memory bank, inclusive.
@@ -29,6 +34,74 @@ pub struct MemoryBank {
     pub end: PhysicalAddress,
 }
 
+#[derive(Debug)]
 pub struct MemoryRegion {
-    pub base: VirtualAddress,
+    pub base: PhysicalAddress,
+    pub flags: MemFlags,
+    pub size: usize,
+    pub is_reserved: bool,
+    pub name: &'static str,
+}
+
+pub fn create_memory_bank_form_memory_region(banks: &[MemoryBank]) -> Vec<MemoryRegion, MAX_REGIONS> {
+    let mut all_regions = Vec::new();
+    let mut push = |r: MemoryRegion| {
+        if r.size > 0 {
+            all_regions.push(r).expect("too many memory regions");
+        }
+    };
+
+    let physical = |addr: usize| kernel_virt_to_phys(VirtualAddress::new(addr));
+
+    push(MemoryRegion { 
+        base: physical(addr_of!(__text_start) as usize), 
+        flags: MemFlags::READ | MemFlags::EXECUTE, 
+        size: addr_of!(__text_end) as usize - addr_of!(__text_start) as usize, 
+        is_reserved: true, 
+        name: ".text"
+    });
+    push(MemoryRegion {
+        base: physical(addr_of!(__rodata_start) as usize),
+        size: addr_of!(__rodata_end) as usize - addr_of!(__rodata_start) as usize,
+        flags: MemFlags::READ,
+        is_reserved: true,
+        name: ".rodata",
+    });
+    push(MemoryRegion {
+        base: physical(addr_of!(__data_start) as usize),
+        size: addr_of!(__data_end) as usize - addr_of!(__data_start) as usize,
+        flags: MemFlags::READ | MemFlags::WRITE,
+        is_reserved: true,
+        name: ".data .tdata .tbss .percpu",
+    });
+    push(MemoryRegion {
+        base: physical(addr_of!(__sys_stack_start) as usize),
+        size: addr_of!(__sys_stack_end) as usize - addr_of!(__sys_stack_start) as usize,
+        flags: MemFlags::READ | MemFlags::WRITE,
+        is_reserved: true,
+        name: "boot stack",
+    });
+    push(MemoryRegion {
+        base: physical(addr_of!(__bss_start) as usize),
+        size: addr_of!(__bss_end) as usize - addr_of!(__bss_start) as usize,
+        flags: MemFlags::READ | MemFlags::WRITE,
+        is_reserved: true,
+        name: ".bss",
+    });
+
+    all_regions
+}
+
+unsafe extern "C" {
+    static __text_start: u8;
+    static __text_end: u8;
+    static __rodata_start: u8;
+    static __rodata_end: u8;
+    static __data_start: u8;
+    static __data_end: u8;
+    static __bss_start: u8;
+    static __bss_end: u8;
+    static __sys_stack_start: u8;
+    static __sys_stack_end: u8;
+    static _end: u8;
 }
