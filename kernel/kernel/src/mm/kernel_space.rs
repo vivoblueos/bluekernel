@@ -17,14 +17,15 @@
 use super::{
     address_space::Vma,
     kernel_phys_to_virt,
+    memory_bank::MemoryBank,
     paging::{first_fit::FirstFitFrameAllocator, mapper::PageMapper, FrameAllocator, PageFormat},
     CachePolicy, MemAttribute, MemFlags, MemType, PhysicalAddress,
 };
 use crate::{arch::page::PageEntry, mm::VirtualAddress};
 use spin::Once;
 
-// Eight RAM regions, one heap region, and the board's device windows.
-const REGION_COUNT: usize = 9 + crate::boards::KERNEL_DEVICE_REGIONS.len();
+// Eight RAM regions, one heap region, and at most one region per board bank.
+const REGION_COUNT: usize = 9 + crate::boards::MEMORY_BANKS.len();
 
 static KERNEL_SPACE: Once<KernelAddressSpace> = Once::new();
 
@@ -236,11 +237,13 @@ impl KernelAddressSpace {
                 normal,
             )?;
         }
-        for &(base, size) in crate::boards::KERNEL_DEVICE_REGIONS {
-            let end = base.checked_add(size).ok_or("device mapping overflow")?;
+        for bank in crate::boards::MEMORY_BANKS {
+            let MemoryBank::MMIO((start, end)) = bank else {
+                continue;
+            };
             space.map_linear(
-                PhysicalAddress::new(base),
-                PhysicalAddress::new(end),
+                *start,
+                *end,
                 MemFlags::READ | MemFlags::WRITE,
                 MemType::Device,
             )?;

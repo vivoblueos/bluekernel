@@ -27,16 +27,6 @@ pub const PSCI_BASE: u32 = 0x84000000;
 pub const GICD: usize = kernel_phys_to_virt(PhysicalAddress::new(0xfd400000)).into_raw();
 pub const GICR: usize = kernel_phys_to_virt(PhysicalAddress::new(0xfd460000)).into_raw();
 
-/// Physical MMIO windows required by the kernel, mapped as device memory.
-pub const KERNEL_DEVICE_REGIONS: &[(usize, usize)] = &[
-    (0xfd40_0000, 0x1_0000), // GIC distributor
-    (
-        0xfd46_0000,
-        blueos_kconfig::CONFIG_NUM_CORES as usize * 0x2_0000,
-    ),
-    (0xfe66_0000, 0x1000), // Console UART
-];
-
 // Physical memory range for buddy allocator (according to uboot bdinfo message).
 pub const PHYS_DRAM_BASE: usize = 0x20_0000;
 pub const PHYS_DRAM_SIZE: usize = 0xefe0_0000;
