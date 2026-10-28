@@ -51,12 +51,28 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
     }
 
     if cpu_id == 0 {
+        assert!(matches!(P::LEVELS, 3 | 4));
         let entry_count = P::PAGE_SIZE / size_of::<PageEntry>();
-        let block_size = P::PAGE_SIZE * entry_count.pow(u32::from(P::LEVELS - 1));
+        // Both formats use L1 blocks (1 GiB). The 48-bit format adds an L0
+        // root: L0 block descriptors are not valid with a 4 KiB granule.
+        let block_level = P::LEVELS - 3;
+        let table_count = usize::from(P::LEVELS - 2);
+        let block_size = P::PAGE_SIZE * entry_count.pow(2);
         let entries_ptr = phys_addr as *mut PageEntry;
         unsafe {
-            core::ptr::write_bytes(entries_ptr, 0, entry_count);
-            let entries = core::slice::from_raw_parts_mut(entries_ptr, entry_count);
+            core::ptr::write_bytes(entries_ptr, 0, entry_count * table_count);
+            let tables = core::slice::from_raw_parts_mut(entries_ptr, entry_count * table_count);
+            let entries = if P::LEVELS == 4 {
+                let (root, blocks) = tables.split_at_mut(entry_count);
+                let descriptor = PageEntry(P::table_descriptor(phys_addr + P::PAGE_SIZE));
+                // The configured 32-bit physical aperture fits in one L1
+                // table, shared by the identity and kernel direct mappings.
+                root[P::get_index(0, 0)] = descriptor;
+                root[P::get_index(crate::mm::KERNEL_VIRT_OFFSET, 0)] = descriptor;
+                blocks
+            } else {
+                tables
+            };
 
             for bank in crate::boards::MEMORY_BANKS {
                 let ((start, end), attributes) = match bank {
@@ -78,11 +94,10 @@ pub unsafe extern "C" fn init_boot_pgtable<P: PageFormat>() -> usize {
                 if start.into_raw() >= end.into_raw() {
                     continue;
                 }
-                // Bootstrap uses root-level blocks (1 GiB for AArch64 4K/39).
                 // Cover every block intersecting the bank's [start, end) range.
                 let start = start.into_raw() & !(block_size - 1);
                 for base in (start..end.into_raw()).step_by(block_size) {
-                    let index = P::get_index(base, 0);
+                    let index = P::get_index(base, block_level);
                     entries[index] = PageEntry(P::get_translate(base, attributes, true));
                 }
             }

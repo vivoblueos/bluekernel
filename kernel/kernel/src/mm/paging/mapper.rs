@@ -18,7 +18,9 @@
 //! installing the root; modifying active tables requires a separate TLB protocol.
 
 use super::{FrameAllocator, PageFormat};
-use crate::mm::{MemAttribute, MemFlags, MemType, PhysicalAddress, VirtualAddress, kernel_phys_to_virt};
+use crate::mm::{
+    kernel_phys_to_virt, MemAttribute, MemFlags, MemType, PhysicalAddress, VirtualAddress,
+};
 use core::{marker::PhantomData, mem::size_of};
 
 pub struct PageMapper<F: FrameAllocator, P: PageFormat = crate::arch::page::PageEntry> {
@@ -136,7 +138,8 @@ impl<F: FrameAllocator, P: PageFormat> PageMapper<F, P> {
         if (virt.into_raw() | len) & (P::PAGE_SIZE - 1) != 0 {
             return Err("mapping range must be page aligned");
         }
-        let end = virt.into_raw()
+        let end = virt
+            .into_raw()
             .checked_add(len)
             .ok_or("virtual mapping range overflow")?;
         if !Self::valid_va(virt.into_raw())
@@ -172,10 +175,12 @@ impl<F: FrameAllocator, P: PageFormat> PageMapper<F, P> {
         if (virt.into_raw() | phys.into_raw() | len) & (P::PAGE_SIZE - 1) != 0 {
             return Err("mapping range must be page aligned");
         }
-        let end = virt.into_raw()
+        let end = virt
+            .into_raw()
             .checked_add(len)
             .ok_or("virtual mapping range overflow")?;
-        let phys_end = phys.into_raw()
+        let phys_end = phys
+            .into_raw()
             .checked_add(len)
             .ok_or("physical mapping range overflow")?;
         if !Self::valid_va(virt.into_raw())
@@ -200,7 +205,13 @@ impl<F: FrameAllocator, P: PageFormat> PageMapper<F, P> {
         }
         for offset in (0..len).step_by(P::PAGE_SIZE) {
             let slot = self.leaf_slot(virt.into_raw() + offset)?;
-            unsafe { slot.write(P::get_translate(phys.into_raw() + offset, attributes, false)) };
+            unsafe {
+                slot.write(P::get_translate(
+                    phys.into_raw() + offset,
+                    attributes,
+                    false,
+                ))
+            };
         }
         Ok(())
     }

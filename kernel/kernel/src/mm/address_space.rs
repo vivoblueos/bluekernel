@@ -360,9 +360,7 @@ mod tests {
             .insert(vma(0x11000, 0x12000, MemFlags::READ))
             .is_err());
         // Begins before and extends into the existing VMA -> overlap.
-        assert!(aspace
-            .insert(vma(0xf000, 0x13000, MemFlags::READ))
-            .is_err());
+        assert!(aspace.insert(vma(0xf000, 0x13000, MemFlags::READ)).is_err());
         // Adjacent (not overlapping) is fine.
         aspace
             .insert(vma(0x14000, 0x15000, MemFlags::READ))

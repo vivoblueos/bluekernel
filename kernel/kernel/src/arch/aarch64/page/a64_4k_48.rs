@@ -12,29 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mm::paging::PageLevel;
+use tock_registers::register_bitfields;
 
-pub struct Level0;
-pub struct Level1;
-pub struct Level2;
-pub struct Level3;
+pub type PageEntry = super::a64_4k::PageEntry<4>;
 
-impl PageLevel for Level0 {
-    const INDEX_SHIFT: u8 = 39;
-    const INDEX_BITS: u8 = 9;
-}
-
-impl PageLevel for Level1 {
-    const INDEX_SHIFT: u8 = 30;
-    const INDEX_BITS: u8 = 9;
-}
-
-impl PageLevel for Level2 {
-    const INDEX_SHIFT: u8 = 21;
-    const INDEX_BITS: u8 = 9;
-}
-
-impl PageLevel for Level3 {
-    const INDEX_SHIFT: u8 = 12;
-    const INDEX_BITS: u8 = 9;
+register_bitfields! {usize,
+    pub PAGE_FORMAT [
+        /// VA[47:39].
+        INDEX0 OFFSET(39) NUMBITS(9) [],
+        /// VA[38:30].
+        INDEX1 OFFSET(30) NUMBITS(9) [],
+        /// VA[29:21].
+        INDEX2 OFFSET(21) NUMBITS(9) [],
+        /// VA[20:12].
+        INDEX3 OFFSET(12) NUMBITS(9) [],
+        PAGE_OFFSET OFFSET(0) NUMBITS(12) [],
+    ]
 }

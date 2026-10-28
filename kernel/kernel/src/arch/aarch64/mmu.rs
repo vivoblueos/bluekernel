@@ -14,14 +14,14 @@
 
 //! AArch64 MMU register setup and address-space activation.
 
-use crate::mm::{PhysicalAddress, VirtualAddress};
+use crate::mm::{paging::PageFormat, PhysicalAddress, VirtualAddress};
 use aarch64_cpu::{
     asm::barrier::{dsb, isb, SY},
     registers::{MAIR_EL1, SCTLR_EL1, TCR_EL1, TTBR0_EL1, TTBR1_EL1},
 };
 use tock_registers::interfaces::*;
 
-const KERNEL_VA_BITS: u64 = 39;
+const KERNEL_VA_BITS: u64 = super::page::PageEntry::VIRT_ADDR_BITS as u64;
 const TCR_TSZ: u64 = u64::BITS as u64 - KERNEL_VA_BITS;
 pub(crate) const KERNEL_VIRT_START: u64 = crate::mm::KERNEL_VIRT_OFFSET as u64;
 pub use crate::mm::{kernel_phys_to_virt, kernel_virt_to_phys};

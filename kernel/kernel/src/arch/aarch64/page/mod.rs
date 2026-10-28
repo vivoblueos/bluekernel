@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod a64_4k;
+
 #[cfg(aarch64_va_bits_39)]
 mod a64_4k_39;
 #[cfg(aarch64_va_bits_39)]
@@ -20,4 +22,4 @@ pub use a64_4k_39::{PageEntry, PAGE_FORMAT};
 #[cfg(aarch64_va_bits_48)]
 mod a64_4k_48;
 #[cfg(aarch64_va_bits_48)]
-pub use a64_4k_48::{Level0, Level1, Level2, Level3};
+pub use a64_4k_48::{PageEntry, PAGE_FORMAT};
