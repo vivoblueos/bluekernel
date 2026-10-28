@@ -32,7 +32,10 @@ use crate::{
 use alloc::string::String;
 use blueos_driver::uart::UartConfig;
 use blueos_hal::{Configuration, PlatPeri};
-use core::ptr::{addr_of, addr_of_mut};
+use core::{
+    ptr::{addr_of, addr_of_mut},
+    sync::atomic::{AtomicBool, Ordering},
+};
 use spin::Once;
 
 // We have to put these globals in the .data section. If not specified explicitly,
@@ -45,7 +48,7 @@ pub(crate) static mut INIT_BSS_DONE: bool = false;
 pub(crate) static mut INIT_ARRAY_DONE: bool = false;
 #[cfg_attr(compatible_old_toolchain, link_section = ".data")]
 #[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
-pub(crate) static mut INIT_HEAP_DONE: bool = false;
+pub(crate) static INIT_HEAP_DONE: AtomicBool = AtomicBool::new(false);
 #[cfg_attr(compatible_old_toolchain, link_section = ".data")]
 #[cfg_attr(not(compatible_old_toolchain), unsafe(link_section = ".data"))]
 pub(crate) static mut INIT_VFS_DONE: bool = false;
@@ -72,6 +75,7 @@ unsafe extern "C" {
     pub static mut __sys_stack_start: u8;
     pub static mut __sys_stack_end: u8;
     pub static mut __heap_start: u8;
+    #[cfg(not(paging))]
     pub static mut __heap_end: u8;
     pub static mut _end: u8;
 }
@@ -92,12 +96,6 @@ extern "C" fn init() {
     init_heap();
     init_runtime();
     init_pin_states(crate::boards::PIN_STATES);
-
-    // FIXME: 4KB paging can only be used after heap initialization is complete.
-    // This call is used to verify that 4KB paging works correctly; perhaps it can be removed later?
-    #[cfg(target_arch = "aarch64")]
-    crate::arch::aarch64::mmu::init_el1_runtime_linearmap()
-        .expect("failed to initialize AArch64 EL1 runtime 4KB linearmap");
 
     let uart = crate::boards::get_device!(console_uart);
     uart.configure(&UartConfig::default()).unwrap();
@@ -230,12 +228,43 @@ fn init_apps() {
 }
 
 #[inline(never)]
-pub(crate) fn init_heap() {
+#[cfg(all(paging, not(allocator_buddy)))]
+pub(crate) fn init_frames() {
+    use crate::mm::{
+        memory_bank::create_memory_region_from_memory_bank,
+        paging::{
+            first_fit::{init_frame_states, FirstFitFrameAllocator, FrameState},
+            PageFormat,
+        },
+        PhysicalAddress,
+    };
+
+    const PAGE_SIZE: usize = <crate::arch::page::PageEntry as PageFormat>::PAGE_SIZE;
+    const PHYS_BASE: usize = crate::boards::PHYS_DRAM_BASE as usize;
+    const FRAME_COUNT: usize = crate::boards::PHYS_DRAM_SIZE as usize / PAGE_SIZE;
+    static mut STATES: [FrameState; FRAME_COUNT] = [FrameState::Free; FRAME_COUNT];
+    let regions = create_memory_region_from_memory_bank(crate::boards::MEMORY_BANKS);
+
+    // SAFETY: CPU0 calls this once after runtime initialization. The static
+    // array is exclusively transferred to FirstFit. The reserved regions cover
+    // this array, the kernel, stacks and boot table; heap backing follows later.
     unsafe {
-        if INIT_HEAP_DONE {
-            return;
-        }
-        allocator::init_heap(addr_of_mut!(__heap_start), addr_of_mut!(__heap_end));
-        INIT_HEAP_DONE = true;
+        let states = &mut *addr_of_mut!(STATES);
+        init_frame_states(PhysicalAddress::new(PHYS_BASE), PAGE_SIZE, states, &regions)
+            .expect("invalid physical memory regions");
+        FirstFitFrameAllocator::instance()
+            .init(PhysicalAddress::new(PHYS_BASE), PAGE_SIZE, states)
+            .expect("failed to initialize FirstFit frame allocator");
     }
+}
+
+#[inline(never)]
+pub(crate) fn init_heap() {
+    if INIT_HEAP_DONE.load(Ordering::Acquire) {
+        return;
+    }
+
+    #[cfg(not(paging))]
+    allocator::init_heap(addr_of_mut!(__heap_start), addr_of_mut!(__heap_end));
+    INIT_HEAP_DONE.store(true, Ordering::Release);
 }

@@ -209,7 +209,10 @@ pub fn init_heap(start: *mut u8, end: *mut u8) {
     #[cfg(not(allocator_buddy))]
     {
         let start_addr = start as usize;
-        let size = unsafe { end.offset_from(start) as usize };
+        let size = (end as usize)
+            .checked_sub(start_addr)
+            .filter(|size| *size != 0)
+            .expect("invalid kernel heap range");
         unsafe {
             HEAP.init(start_addr, size);
         }
