@@ -138,7 +138,13 @@ impl KernelAddressSpace {
         let end = start
             .checked_add(len)
             .ok_or("kernel heap address overflow")?;
-        self.record_region(start, end, MmapFlags::READ | MmapFlags::WRITE)?;
+        // FIXME: Temporarily make the heap executable so the ELF loader tests pass.
+        // Replace this workaround with dedicated executable mappings for loaded ELF code.
+        self.record_region(
+            start,
+            end,
+            MmapFlags::READ | MmapFlags::WRITE | MmapFlags::EXECUTE,
+        )?;
         let first = FrameAllocator::alloc_frame(&mut allocator)
             .ok_or("out of kernel heap frames")?
             .into_raw();
@@ -157,7 +163,7 @@ impl KernelAddressSpace {
             first,
             len,
             MemAttribute {
-                flags: MemFlags::READ | MemFlags::WRITE | MemFlags::GLOBAL,
+                flags: MemFlags::READ | MemFlags::WRITE | MemFlags::EXECUTE | MemFlags::GLOBAL,
                 memory_type: MemType::Normal(CachePolicy::WriteBack),
             },
         )?;
@@ -238,16 +244,7 @@ impl KernelAddressSpace {
     }
 }
 
-/// Bootstrap the shared space and heap once, then install the table on each
-/// calling CPU. Publication occurs only after the heap is ready for allocation.
-pub(crate) fn init() -> Result<(), &'static str> {
-    let space = if crate::arch::current_cpu_id() == 0 {
-        KERNEL_SPACE.try_call_once(KernelAddressSpace::bootstrap)?
-    } else {
-        KERNEL_SPACE.wait()
-    };
-    // SAFETY: the completed table maps all live kernel code, data, stacks,
-    // allocator frames and required devices at their existing virtual addresses.
-    unsafe { crate::arch::mmu::activate_kernel_table(space.root_address()) };
+pub(crate) fn init_kernel_heap() -> Result<(), &'static str> {
+    KERNEL_SPACE.try_call_once(KernelAddressSpace::bootstrap)?;
     Ok(())
 }

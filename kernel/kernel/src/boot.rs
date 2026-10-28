@@ -229,7 +229,7 @@ fn init_apps() {
 
 #[inline(never)]
 #[cfg(all(paging, not(allocator_buddy)))]
-fn init_frames() {
+pub(crate) fn init_frames() {
     use crate::mm::{
         kernel_virt_to_phys,
         paging::{
@@ -271,15 +271,7 @@ pub(crate) fn init_heap() {
     if INIT_HEAP_DONE.load(Ordering::Acquire) {
         return;
     }
-    #[cfg(paging)]
-    {
-        if arch::current_cpu_id() == 0 {
-            #[cfg(not(allocator_buddy))]
-            init_frames();
-        }
-        crate::mm::kernel_space::init()
-            .expect("failed to initialize kernel heap and address space");
-    }
+    
     #[cfg(not(paging))]
     allocator::init_heap(addr_of_mut!(__heap_start), addr_of_mut!(__heap_end));
     INIT_HEAP_DONE.store(true, Ordering::Release);

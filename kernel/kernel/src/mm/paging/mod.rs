@@ -133,4 +133,5 @@ impl FrameUsage {
 pub unsafe trait FrameAllocator {
     // allocate a frame
     fn alloc_frame(&mut self) -> Option<PhysicalAddress>;
+    fn usage(&self) -> FrameUsage;
 }

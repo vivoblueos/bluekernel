@@ -125,4 +125,8 @@ unsafe impl FrameAllocator for &FirstFitFrameAllocator {
     fn alloc_frame(&mut self) -> Option<PhysicalAddress> {
         FirstFitFrameAllocator::alloc_frame(self)
     }
+
+    fn usage(&self) -> FrameUsage {
+        FirstFitFrameAllocator::usage(self).expect("FirstFitFrameAllocator didn't be initialized.")
+    }
 }
